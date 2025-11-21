@@ -79,6 +79,7 @@ def traffic():
         saved = os.path.join(UPLOAD_DIR, f"{datetime.utcnow().timestamp()}_{filename}")
         f.save(saved)
         summary = process_pcap(saved)
+        print(summary)
         return jsonify(summary), 200
 
     # Case 2: raw bytes upload

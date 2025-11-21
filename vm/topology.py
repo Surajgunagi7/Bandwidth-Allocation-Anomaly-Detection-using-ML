@@ -17,6 +17,7 @@ from mn_wifi.node import OVSKernelAP
 from mn_wifi.link import wmediumd
 from mn_wifi.wmediumdConnector import interference
 import os
+from pathlib import Path
 
 def topology(start_collector=False):
     """Create a custom topology with AP, stations, wired host, and controller"""
@@ -77,25 +78,34 @@ def topology(start_collector=False):
     c0.start()
     ap1.start([c0])
 
+    # AUTO-START COLLECTOR ON AP1
     # --------------------------------------------------------------
-    # AUTO-START COLLECTOR ON AP
-    # --------------------------------------------------------------
+
     if start_collector:
         info("*** Starting collector on AP1\n")
 
-        user = os.getenv("USER")     # auto-detect username
-        collector_path = f"/home/{user}/Bandwidth-Allocation-Anomaly-Detection-using-ML/vm/collector.py"
+        # repo_root = parent of the directory containing this file
+        topology_file = Path(__file__).resolve()
+        repo_root = topology_file.parents[1]     # moves from repo_root/vm → repo_root
 
-        iface_guess = "ap1-wlan1"
+        collector_path = repo_root / "vm" / "collector.py"
+
+        iface = "ap1-wlan1"
         backend_url = "http://127.0.0.1:5000/traffic"
+        capture_dir = "/tmp/captures"
 
-        if os.path.exists(collector_path):
-            cmd = f"python3 {collector_path} --iface {iface_guess} --backend {backend_url} --ap_id ap1 &"
+        if collector_path.exists():
+            cmd = (
+                f"python3 {collector_path} "
+                f"--iface {iface} "
+                f'--backend "{backend_url}" '
+                f"--capture-dir {capture_dir} "
+                f"&"
+            )
             info(f"Running on AP1: {cmd}\n")
             ap1.cmd(cmd)
         else:
-            info(f"Collector script NOT found: {collector_path}\n")
-            
+            info(f"Collector script NOT found at: {collector_path}\n")
 
     info("*** Testing connectivity\n")
     net.pingAll()
@@ -108,4 +118,4 @@ def topology(start_collector=False):
 
 if __name__ == '__main__':
     setLogLevel('info')
-    topology(start_collector=False)
+    topology(start_collector=True)
