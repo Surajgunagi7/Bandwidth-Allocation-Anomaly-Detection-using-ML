@@ -317,17 +317,21 @@ def signal_handler(signum, frame):
 
 # ---------- main execution ----------
 if __name__ == "__main__":
+    start_time = time.time()
     args = parser.parse_args()
     
     # setup logging early
     logger = setup_logging(args.log_file)
-    
+
+
     for s in (signal.SIGINT, signal.SIGTERM):
         signal.signal(s, signal_handler)
 
     base_dir = Path(args.capture_dir)
     incoming_dir, sent_dir, failed_dir = ensure_dirs(base_dir)
-    logger.info("Capture base dir: %s (incoming=%s)", base_dir, incoming_dir)
+    logger.info("Collector STARTED | iface=%s | backend=%s | rotate=%ds | pid=%d", 
+                args.iface, args.backend, args.rotate_secs, os.getpid())
+    logger.info("Capture dirs → incoming=%s | sent=%s | failed=%s", incoming_dir, sent_dir, failed_dir)
 
     # build capture pattern: we'll write into incoming dir with strftime pattern
     pattern = str(incoming_dir / "cap-%Y%m%dT%H%M%S.pcap")
@@ -381,4 +385,14 @@ if __name__ == "__main__":
         u.stop()
         u.join(timeout=2)
 
-    logger.info("Collector exited cleanly")
+        logger.info("Collector exited cleanly")
+
+    # Final statistics
+    try:
+        uploaded = len(list(sent_dir.iterdir())) if sent_dir.exists() else 0
+        failed = len(list(failed_dir.iterdir())) if failed_dir.exists() else 0
+        pending = len(list(incoming_dir.iterdir())) if incoming_dir.exists() else 0
+    except:
+        uploaded = failed = pending = "error"
+    logger.info("Collector FINAL STATS | uploaded=%s | failed=%s | pending=%s | uptime=%.1fs", 
+                uploaded, failed, pending, time.time() - start_time)

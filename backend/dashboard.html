@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ML-Powered WiFi Controller</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/luxon"></script>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; background: #0f0f23; color: #e0e0ff; margin: 0; padding: 20px; }
+    .container { max-width: 1400px; margin: auto; }
+    h1 { text-align: center; color: #00d4ff; text-shadow: 0 0 10px #00d4ff; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin: 20px 0; }
+    .card {
+      background: rgba(30, 30, 70, 0.8); border-radius: 12px; padding: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      border: 1px solid #4444aa;
+    }
+    .card h3 { margin: 0 0 10px 0; color: #00ffaa; }
+    .anomaly { border-color: #ff0066 !important; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100% { box-shadow: 0 0 20px #ff0066; } 50% { box-shadow: 0 0 40px #ff0066; } }
+    canvas { border-radius: 12px; background: rgba(20,20,40,0.8); padding: 10px; }
+    .footer { text-align: center; margin-top: 40px; color: #888; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>ML-Powered WiFi Controller</h1>
+    <div id="status">Connecting...</div>
+
+    <div class="stats-grid">
+      <div class="card"><h3>Total Bandwidth</h3><div id="total-bw">0 Mbps</div></div>
+      <div class="card"><h3>Active Devices</h3><div id="devices">0</div></div>
+      <div class="card"><h3>Anomalies Detected</h3><div id="anomalies">0</div></div>
+      <div class="card"><h3>Uptime</h3><div id="uptime">0s</div></div>
+    </div>
+
+    <div style="margin: 30px 0;">
+      <canvas id="bandwidthChart"></canvas>
+    </div>
+
+    <div id="device-list"></div>
+  </div>
+
+  <div class="footer">Real-time ML-Driven Bandwidth Allocation & Anomaly Detection</div>
+
+  <script>
+    const API = "http://localhost:5000";
+    let chart;
+
+    function formatBytesPerSec(bps) {
+      if (bps > 1e6) return (bps/1e6).toFixed(1) + " Mbps";
+      if (bps > 1e3) return (bps/1e3).toFixed(1) + " Kbps";
+      return bps + " bps";
+    }
+
+    function updateDashboard() {
+      fetch(`${API}/stats`)
+        .then(r => r.json())
+        .then(data => {
+          document.getElementById("status").textContent = "Connected • Last update: " + new Date().toLocaleTimeString();
+          document.getElementById("total-bw").textContent = data.total_bandwidth_mbps + " Mbps";
+          document.getElementById("devices").textContent = data.active_devices || 0;
+          document.getElementById("anomalies").textContent = data.anomalies_detected || 0;
+          document.getElementById("uptime").textContent = Math.floor(data.uptime || 0) + "s";
+
+          // Update chart
+          const labels = Object.keys(data.allocations || {}).map(m => m.slice(-8));
+          const bwData = Object.values(data.allocations || {}).map(a => a.bandwidth_kbps / 1000);
+
+          if (!chart) {
+            chart = new Chart(document.getElementById("bandwidthChart"), {
+              type: 'bar',
+              data: { labels, datasets: [{ label: 'Allocated Bandwidth (Mbps)', data: bwData, backgroundColor: '#00d4ff' }] },
+              options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            });
+          } else {
+            chart.data.labels = labels;
+            chart.data.datasets[0].data = bwData;
+            chart.update('quiet');
+          }
+
+          // Device list with anomaly highlighting
+          let list = "<h2 style='color:#00ffaa'>Active Devices</h2><div class='stats-grid'>";
+          (data.allocations || []).forEach(alloc => {
+            const mac = alloc.mac;
+            const bw = alloc.bandwidth_kbps;
+            const cls = alloc.is_anomaly ? "anomaly" : "";
+            const type = alloc.traffic_class || "unknown";
+            list += `
+              <div class="card ${cls}">
+                <h3>${mac}</h3>
+                <p><strong>${formatBytesPerSec(bw * 1000)}</strong></p>
+                <p>Type: ${type}</p>
+                ${alloc.is_anomaly ? "<p>ANOMALY DETECTED!</p>" : ""}
+              </div>`;
+          });
+          list += "</div>";
+          document.getElementById("device-list").innerHTML = list;
+        })
+        .catch(err => {
+          document.getElementById("status").textContent = "Offline • Check backend";
+          console.error(err);
+        });
+    }
+
+    // Auto-refresh every 5 seconds
+    updateDashboard();
+    setInterval(updateDashboard, 5000);
+  </script>
+</body>
+</html>

@@ -18,6 +18,7 @@ from mn_wifi.link import wmediumd
 from mn_wifi.wmediumdConnector import interference
 import os
 from pathlib import Path
+import time
 
 def topology(start_collector=False):
     """Create a custom topology with AP, stations, wired host, and controller"""
@@ -84,15 +85,16 @@ def topology(start_collector=False):
     if start_collector:
         info("*** Starting collector on AP1\n")
 
-        # repo_root = parent of the directory containing this file
         topology_file = Path(__file__).resolve()
-        repo_root = topology_file.parents[1]     # moves from repo_root/vm → repo_root
-
-        collector_path = repo_root / "vm" / "collector.py"
+        repo_root = topology_file.parents[1]
+        collector_path = repo_root / "mininet" / "collector.py"
 
         iface = "ap1-wlan1"
-        backend_url = "http://127.0.0.1:5000/traffic"
+        backend_url = "http://10.0.2.2:5000/traffic"   # ← FIXED: reachable from Mininet
         capture_dir = "/tmp/captures"
+
+        # Ensure dirs exist
+        ap1.cmd(f"mkdir -p {capture_dir}/{{incoming,sent,failed}}")
 
         if collector_path.exists():
             cmd = (
@@ -100,18 +102,23 @@ def topology(start_collector=False):
                 f"--iface {iface} "
                 f'--backend "{backend_url}" '
                 f"--capture-dir {capture_dir} "
+                f"--rotate-secs 3 "
                 f"&"
             )
-            info(f"Running on AP1: {cmd}\n")
+            info(f"Running: {cmd}\n")
             ap1.cmd(cmd)
         else:
-            info(f"Collector script NOT found at: {collector_path}\n")
+            info(f"Collector not found: {collector_path}\n")
 
     info("*** Testing connectivity\n")
     net.pingAll()
 
     info("*** Running CLI\n")
     CLI(net)
+
+    info("*** Shutting down collector...\n")
+    ap1.cmd("pkill -f collector.py || true")
+    time.sleep(3)
 
     info("*** Stopping network\n")
     net.stop()

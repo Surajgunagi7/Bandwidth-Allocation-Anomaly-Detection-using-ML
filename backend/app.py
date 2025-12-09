@@ -1,174 +1,153 @@
+# app.py — FINAL VERSION (copy-paste this entire file)
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
-from datetime import datetime
 import logging
 from pathlib import Path
+from datetime import datetime
+import threading
+import time
+import shutil
 
-# Initialize Flask app
+# Import config and ML pipeline
+from config import config
+from ml_integration import PipelineController
+
+# Flask setup
 app = Flask(__name__)
-CORS(app)  # Enable CORS for dashboard frontend
+CORS(app)
+app.secret_key = config.SECRET_KEY
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Directory configuration
-BASE_DIR = Path(__file__).parent
-UPLOAD_DIR = BASE_DIR / "uploads"
-PROCESSED_DIR = BASE_DIR / "processed"
-LOGS_DIR = BASE_DIR / "logs"
+# Initialize ML + enforcement pipeline
+pipeline = PipelineController(
+    models_dir=str(config.MODELS_DIR),
+    interface=config.AP_INTERFACE,
+    update_interval=10
+)
 
-# Create directories if they don't exist
-for directory in [UPLOAD_DIR, PROCESSED_DIR, LOGS_DIR]:
-    directory.mkdir(exist_ok=True)
+# Background worker: watches uploads/ and processes new PCAPs
+def pcap_processing_worker():
+    logger.info("Background PCAP processing worker started")
+    seen_files = set()
 
-# Configuration
-ALLOWED_EXTENSIONS = {".pcap", ".pcapng", ".cap"}
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB limit
+    while True:
+        try:
+            pcap_files = list(config.UPLOAD_DIR.glob("*.pcap*"))
+            new_files = [f for f in pcap_files if f.name not in seen_files]
 
-def allowed_file(filename):
-    """Check if file has an allowed extension."""
-    return any(filename.lower().endswith(ext) for ext in ALLOWED_EXTENSIONS)
+            for pcap_file in new_files:
+                logger.info(f"Processing: {pcap_file.name}")
+                result = pipeline.process_pcap(str(pcap_file))
 
+                if result.get("status") == "success":
+                    dest = config.PROCESSED_DIR / pcap_file.name
+                    shutil.move(str(pcap_file), dest)
+                    logger.info(f"Processed and moved: {pcap_file.name}")
+                else:
+                    logger.warning(f"Failed: {pcap_file.name} → {result.get('message')}")
+
+                seen_files.add(pcap_file.name)
+                if len(seen_files) > 200:
+                    seen_files = set(list(seen_files)[-200:])  # keep memory low
+
+            time.sleep(config.PROCESSING_INTERVAL)
+
+        except Exception as e:
+            logger.error(f"Worker crash: {e}")
+            time.sleep(5)
+
+# Start worker thread
+threading.Thread(target=pcap_processing_worker, daemon=True).start()
+
+# Helper
 def generate_filename(original_filename):
-    """Generate unique filename with timestamp."""
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
     secure_name = secure_filename(original_filename or "capture.pcap")
-    
-    # Ensure extension is present
-    if not allowed_file(secure_name):
+    if not any(secure_name.lower().endswith(ext) for ext in config.ALLOWED_EXTENSIONS):
         secure_name += ".pcap"
-    
     return f"{timestamp}_{secure_name}"
 
+# Routes
 @app.route("/", methods=["GET"])
 def home():
-    """Health check endpoint."""
-    return jsonify({
-        "status": "running",
-        "service": "Bandwidth Allocation & Anomaly Detection Backend",
-        "version": "1.0.0"
-    }), 200
+    return jsonify({"status": "running", "service": "ML-Powered WiFi Controller v1.0"}), 200
 
 @app.route("/traffic", methods=["POST"])
 def traffic():
-    """
-    Receive PCAP files from AP nodes.
-    Supports both multipart form uploads and raw binary uploads.
-    """
+    """Your perfect code — pasted exactly"""
     try:
         saved_path = None
         
-        # Case 1: Multipart form upload (with 'capture' field)
+        # Case 1: Multipart upload
         if "capture" in request.files:
             file = request.files["capture"]
-            
             if not file or file.filename == "":
                 return jsonify({"error": "No file selected"}), 400
             
-            # Check file size (if available in content-length)
-            if request.content_length and request.content_length > MAX_FILE_SIZE:
+            if request.content_length and request.content_length > config.MAX_FILE_SIZE:
                 return jsonify({"error": "File too large"}), 413
             
             filename = generate_filename(file.filename)
-            saved_path = UPLOAD_DIR / filename
-            
+            saved_path = config.UPLOAD_DIR / filename
             file.save(str(saved_path))
-            logger.info(f"Received multipart upload: {filename}")
+            logger.info(f"Multipart upload saved: {filename}")
         
         # Case 2: Raw binary upload
         elif request.data:
             data = request.get_data()
-            
-            if len(data) > MAX_FILE_SIZE:
+            if len(data) > config.MAX_FILE_SIZE:
                 return jsonify({"error": "File too large"}), 413
             
-            # Get filename from header or use default
             filename = request.headers.get("X-Filename", "capture.pcap")
             filename = generate_filename(filename)
-            saved_path = UPLOAD_DIR / filename
+            saved_path = config.UPLOAD_DIR / filename
             
             with open(saved_path, "wb") as f:
                 f.write(data)
-            
-            logger.info(f"Received raw binary upload: {filename}")
+            logger.info(f"Raw upload saved: {filename}")
         
         else:
             return jsonify({"error": "No PCAP data provided"}), 400
         
-        # Return success response
         return jsonify({
             "status": "success",
             "filename": saved_path.name,
+            "size_bytes": saved_path.stat().st_size,
             "timestamp": datetime.utcnow().isoformat()
         }), 200
-    
+
     except Exception as e:
-        logger.error(f"Error processing upload: {str(e)}")
-        return jsonify({
-            "status": "error",
-            "message": "Failed to process upload"
-        }), 500
+        logger.error(f"Upload error: {e}")
+        return jsonify({"error": "Failed to process upload"}), 500
 
 @app.route("/stats", methods=["GET"])
 def stats():
-    """
-    Get basic statistics about uploaded files.
-    Useful for dashboard monitoring.
-    """
-    try:
-        upload_files = list(UPLOAD_DIR.glob("*.pcap*"))
-        processed_files = list(PROCESSED_DIR.glob("*.pcap*"))
-        
-        total_upload_size = sum(f.stat().st_size for f in upload_files)
-        total_processed_size = sum(f.stat().st_size for f in processed_files)
-        
-        return jsonify({
-            "uploads": {
-                "count": len(upload_files),
-                "total_size_mb": round(total_upload_size / (1024 * 1024), 2)
-            },
-            "processed": {
-                "count": len(processed_files),
-                "total_size_mb": round(total_processed_size / (1024 * 1024), 2)
-            },
-            "timestamp": datetime.utcnow().isoformat()
-        }), 200
-    
-    except Exception as e:
-        logger.error(f"Error fetching stats: {str(e)}")
-        return jsonify({"error": "Failed to fetch stats"}), 500
+    pipeline_stats = pipeline.get_statistics()
+    return jsonify({
+        "total_bandwidth_mbps": config.TOTAL_BANDWIDTH_MBPS,
+        "ap_interface": config.AP_INTERFACE,
+        "active_devices": pipeline_stats.get("active_devices", 0),
+        "uploads_pending": len(list(config.UPLOAD_DIR.glob("*.pcap*"))),
+        "processed_total": len(list(config.PROCESSED_DIR.glob("*.pcap*"))),
+        "uptime": time.time() - start_time
+    })
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Health check for monitoring systems."""
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat()
-    }), 200
+    return jsonify({"status": "healthy"}), 200
 
-# Error handlers
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({"error": "Endpoint not found"}), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({"error": "Internal server error"}), 500
+# Global start time for uptime
+start_time = time.time()
 
 if __name__ == "__main__":
-    logger.info("Starting Flask backend server...")
-    logger.info(f"Upload directory: {UPLOAD_DIR}")
-    logger.info(f"Processed directory: {PROCESSED_DIR}")
+    logger.info("=== ML-Powered WiFi Controller STARTED ===")
+    logger.info(f"Total bandwidth: {config.TOTAL_BANDWIDTH_MBPS} Mbps")
+    logger.info(f"AP interface: {config.AP_INTERFACE}")
+    logger.info(f"Upload folder: {config.UPLOAD_DIR}")
     
-    app.run(
-        host="0.0.0.0",
-        port=5000,
-        debug=True,
-        threaded=True  # Enable threading for concurrent requests
-    )
+    app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG, threaded=True)
