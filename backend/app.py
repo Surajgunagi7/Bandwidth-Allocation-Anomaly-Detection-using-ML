@@ -1,104 +1,174 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
 from datetime import datetime
-from scapy.all import PcapReader, IP, IPv6, TCP, UDP
+import logging
+from pathlib import Path
 
+# Initialize Flask app
 app = Flask(__name__)
+CORS(app)  # Enable CORS for dashboard frontend
 
-BASE_DIR = os.path.dirname(__file__)
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-MAX_PRINT = 20
-MAX_INSPECT = 3000
-ALLOWED_EXT = {".pcap", ".pcapng", ".cap"}
+# Directory configuration
+BASE_DIR = Path(__file__).parent
+UPLOAD_DIR = BASE_DIR / "uploads"
+PROCESSED_DIR = BASE_DIR / "processed"
+LOGS_DIR = BASE_DIR / "logs"
 
-def allowed_file(name):
-    low = name.lower()
-    return any(low.endswith(ext) for ext in ALLOWED_EXT)
+# Create directories if they don't exist
+for directory in [UPLOAD_DIR, PROCESSED_DIR, LOGS_DIR]:
+    directory.mkdir(exist_ok=True)
 
-def process_pcap(path):
-    """Return short structured JSON summary."""
-    summaries = []
-    total = 0
+# Configuration
+ALLOWED_EXTENSIONS = {".pcap", ".pcapng", ".cap"}
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB limit
 
-    try:
-        rdr = PcapReader(path)
-    except Exception as e:
-        return {"error": f"failed to read pcap: {e}"}
+def allowed_file(filename):
+    """Check if file has an allowed extension."""
+    return any(filename.lower().endswith(ext) for ext in ALLOWED_EXTENSIONS)
 
-    for pkt in rdr:
-        total += 1
-        if len(summaries) < MAX_PRINT:
-            length = len(pkt)
-            src = dst = proto = "-"
+def generate_filename(original_filename):
+    """Generate unique filename with timestamp."""
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+    secure_name = secure_filename(original_filename or "capture.pcap")
+    
+    # Ensure extension is present
+    if not allowed_file(secure_name):
+        secure_name += ".pcap"
+    
+    return f"{timestamp}_{secure_name}"
 
-            if IP in pkt:
-                src = pkt[IP].src
-                dst = pkt[IP].dst
-                if TCP in pkt:
-                    proto = f"TCP {pkt[TCP].sport}->{pkt[TCP].dport}"
-                elif UDP in pkt:
-                    proto = f"UDP {pkt[UDP].sport}->{pkt[UDP].dport}"
-                else:
-                    proto = f"IP proto={pkt[IP].proto}"
-
-            elif IPv6 in pkt:
-                src = pkt[IPv6].src
-                dst = pkt[IPv6].dst
-                proto = "IPv6"
-
-            summaries.append({
-                "len": length,
-                "src": src,
-                "dst": dst,
-                "proto": proto
-            })
-
-        if total >= MAX_INSPECT:
-            break
-
-    rdr.close()
-
-    return {
-        "total_packets": total,
-        "shown_packets": len(summaries),
-        "packets": summaries
-    }
+@app.route("/", methods=["GET"])
+def home():
+    """Health check endpoint."""
+    return jsonify({
+        "status": "running",
+        "service": "Bandwidth Allocation & Anomaly Detection Backend",
+        "version": "1.0.0"
+    }), 200
 
 @app.route("/traffic", methods=["POST"])
 def traffic():
-    # Case 1: multipart upload
-    if "capture" in request.files:
-        f = request.files["capture"]
-        filename = secure_filename(f.filename or "capture.pcap")
-        if not allowed_file(filename):
-            filename += ".pcap"
+    """
+    Receive PCAP files from AP nodes.
+    Supports both multipart form uploads and raw binary uploads.
+    """
+    try:
+        saved_path = None
+        
+        # Case 1: Multipart form upload (with 'capture' field)
+        if "capture" in request.files:
+            file = request.files["capture"]
+            
+            if not file or file.filename == "":
+                return jsonify({"error": "No file selected"}), 400
+            
+            # Check file size (if available in content-length)
+            if request.content_length and request.content_length > MAX_FILE_SIZE:
+                return jsonify({"error": "File too large"}), 413
+            
+            filename = generate_filename(file.filename)
+            saved_path = UPLOAD_DIR / filename
+            
+            file.save(str(saved_path))
+            logger.info(f"Received multipart upload: {filename}")
+        
+        # Case 2: Raw binary upload
+        elif request.data:
+            data = request.get_data()
+            
+            if len(data) > MAX_FILE_SIZE:
+                return jsonify({"error": "File too large"}), 413
+            
+            # Get filename from header or use default
+            filename = request.headers.get("X-Filename", "capture.pcap")
+            filename = generate_filename(filename)
+            saved_path = UPLOAD_DIR / filename
+            
+            with open(saved_path, "wb") as f:
+                f.write(data)
+            
+            logger.info(f"Received raw binary upload: {filename}")
+        
+        else:
+            return jsonify({"error": "No PCAP data provided"}), 400
+        
+        # Return success response
+        return jsonify({
+            "status": "success",
+            "filename": saved_path.name,
+            "timestamp": datetime.utcnow().isoformat()
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error processing upload: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Failed to process upload"
+        }), 500
 
-        saved = os.path.join(UPLOAD_DIR, f"{datetime.utcnow().timestamp()}_{filename}")
-        f.save(saved)
-        summary = process_pcap(saved)
-        print(summary)
-        return jsonify(summary), 200
+@app.route("/stats", methods=["GET"])
+def stats():
+    """
+    Get basic statistics about uploaded files.
+    Useful for dashboard monitoring.
+    """
+    try:
+        upload_files = list(UPLOAD_DIR.glob("*.pcap*"))
+        processed_files = list(PROCESSED_DIR.glob("*.pcap*"))
+        
+        total_upload_size = sum(f.stat().st_size for f in upload_files)
+        total_processed_size = sum(f.stat().st_size for f in processed_files)
+        
+        return jsonify({
+            "uploads": {
+                "count": len(upload_files),
+                "total_size_mb": round(total_upload_size / (1024 * 1024), 2)
+            },
+            "processed": {
+                "count": len(processed_files),
+                "total_size_mb": round(total_processed_size / (1024 * 1024), 2)
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error fetching stats: {str(e)}")
+        return jsonify({"error": "Failed to fetch stats"}), 500
 
-    # Case 2: raw bytes upload
-    data = request.get_data()
-    if data:
-        filename = request.headers.get("X-Filename", "capture.pcap")
-        filename = secure_filename(filename)
-        if not allowed_file(filename):
-            filename += ".pcap"
+@app.route("/health", methods=["GET"])
+def health():
+    """Health check for monitoring systems."""
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat()
+    }), 200
 
-        saved = os.path.join(UPLOAD_DIR, f"{datetime.utcnow().timestamp()}_{filename}")
-        with open(saved, "wb") as fh:
-            fh.write(data)
+# Error handlers
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({"error": "Endpoint not found"}), 404
 
-        summary = process_pcap(saved)
-        return jsonify(summary), 200
-
-    return jsonify({"error": "no pcap provided"}), 400
-
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    logger.info("Starting Flask backend server...")
+    logger.info(f"Upload directory: {UPLOAD_DIR}")
+    logger.info(f"Processed directory: {PROCESSED_DIR}")
+    
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        debug=True,
+        threaded=True  # Enable threading for concurrent requests
+    )
