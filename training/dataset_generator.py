@@ -8,6 +8,7 @@ import os
 import time
 import subprocess
 import json
+import shutil
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
@@ -22,7 +23,7 @@ class MininetwifiScenarioGenerator:
     
     def __init__(self, 
                  output_dir: str = "./training_data",
-                 pcap_dir: str = "./pcap_captures"):
+                 pcap_dir: str = "./training_data/pcap_captures"):
         """
         Args:
             output_dir: Directory to save processed features
@@ -30,8 +31,8 @@ class MininetwifiScenarioGenerator:
         """
         self.output_dir = Path(output_dir)
         self.pcap_dir = Path(pcap_dir)
-        self.output_dir.mkdir(exist_ok=True)
-        self.pcap_dir.mkdir(exist_ok=True)
+        self.output_dir.mkdir(exist_ok=True, parents=True)
+        self.pcap_dir.mkdir(exist_ok=True, parents=True)
         
         self.scenarios = []
         self._define_scenarios()
@@ -46,45 +47,36 @@ class MininetwifiScenarioGenerator:
                 'label': 'normal',
                 'bandwidth_label': 'low',
                 'bandwidth_kbps': 500,
-                'command': 'wget -O /dev/null http://example.com',
-                'duration': 30,
-                'repeat': 400
+                'command': 'ping -c 30 10.0.0.4',  # Changed from wget
+                'duration': 35,
+                'repeat': 10  # Reduced for testing
             },
             {
                 'name': 'video_streaming',
                 'label': 'normal',
                 'bandwidth_label': 'medium',
                 'bandwidth_kbps': 3000,
-                'command': 'iperf3 -c {server} -u -b 3M -t 30',
-                'duration': 30,
-                'repeat': 400
+                'command': 'iperf3 -c 10.0.0.4 -u -b 3M -t 30',
+                'duration': 35,
+                'repeat': 10
             },
             {
                 'name': 'voip_call',
                 'label': 'normal',
                 'bandwidth_label': 'low',
                 'bandwidth_kbps': 128,
-                'command': 'iperf3 -c {server} -u -b 128K -t 30',
-                'duration': 30,
-                'repeat': 400
+                'command': 'iperf3 -c 10.0.0.4 -u -b 128K -t 30',
+                'duration': 35,
+                'repeat': 10
             },
             {
                 'name': 'file_download',
                 'label': 'normal',
                 'bandwidth_label': 'high',
                 'bandwidth_kbps': 8000,
-                'command': 'iperf3 -c {server} -t 30',
-                'duration': 30,
-                'repeat': 400
-            },
-            {
-                'name': 'mixed_activity',
-                'label': 'normal',
-                'bandwidth_label': 'medium',
-                'bandwidth_kbps': 2000,
-                'command': 'iperf3 -c {server} -u -b 2M -t 30',
-                'duration': 30,
-                'repeat': 400
+                'command': 'iperf3 -c 10.0.0.4 -t 30',
+                'duration': 35,
+                'repeat': 10
             },
         ])
         
@@ -95,112 +87,106 @@ class MininetwifiScenarioGenerator:
                 'label': 'normal',
                 'bandwidth_label': 'high',
                 'bandwidth_kbps': 12000,
-                'command': 'iperf3 -c {server} -P 3 -u -b 4M -t 30',
-                'duration': 30,
-                'repeat': 500
-            },
-            {
-                'name': 'large_transfer',
-                'label': 'normal',
-                'bandwidth_label': 'high',
-                'bandwidth_kbps': 15000,
-                'command': 'iperf3 -c {server} -t 30',
-                'duration': 30,
-                'repeat': 500
-            },
-            {
-                'name': 'video_conference',
-                'label': 'normal',
-                'bandwidth_label': 'medium',
-                'bandwidth_kbps': 4000,
-                'command': 'iperf3 -c {server} -u -b 4M -t 30',
-                'duration': 30,
-                'repeat': 500
+                'command': 'iperf3 -c 10.0.0.4 -P 3 -u -b 4M -t 30',
+                'duration': 35,
+                'repeat': 10
             },
         ])
         
         # Anomaly Scenarios
         self.scenarios.extend([
             {
-                'name': 'ddos_flood',
-                'label': 'anomaly',
-                'bandwidth_label': 'extreme',
-                'bandwidth_kbps': 50000,
-                'command': 'hping3 --flood --rand-source -p 80 {server}',
-                'duration': 20,
-                'repeat': 400
-            },
-            {
-                'name': 'port_scan',
-                'label': 'anomaly',
-                'bandwidth_label': 'low',
-                'bandwidth_kbps': 100,
-                'command': 'nmap -p 1-1000 {server}',
-                'duration': 30,
-                'repeat': 400
-            },
-            {
                 'name': 'bandwidth_hog',
                 'label': 'anomaly',
                 'bandwidth_label': 'extreme',
                 'bandwidth_kbps': 80000,
-                'command': 'iperf3 -c {server} -P 10 -t 30',
-                'duration': 30,
-                'repeat': 400
-            },
-            {
-                'name': 'abnormal_connections',
-                'label': 'anomaly',
-                'bandwidth_label': 'low',
-                'bandwidth_kbps': 200,
-                'command': 'for i in $(seq 1 100); do nc -zv {server} $((RANDOM % 65535 + 1)); done',
-                'duration': 20,
-                'repeat': 400
+                'command': 'iperf3 -c 10.0.0.4 -P 10 -t 30',
+                'duration': 35,
+                'repeat': 10
             },
         ])
     
     def generate_mininet_topology(self):
-        """Use the real topology script"""
+        """Get path to real topology script"""
+        # Assuming script is run from training/ directory
         real_topo = Path(__file__).parent.parent / "mininet" / "topology.py"
         if not real_topo.exists():
-            raise FileNotFoundError("topology.py not found in mininet/ folder")
+            raise FileNotFoundError(f"topology.py not found at {real_topo}")
         return str(real_topo)
     
     def run_scenario(self, scenario: dict, iteration: int) -> str:
+        """Run a single scenario iteration"""
         topo_script = self.generate_mininet_topology()
         pcap_file = self.pcap_dir / f"{scenario['name']}_{iteration}_{int(time.time())}.pcap"
     
         logger.info(f"Running {scenario['name']} (iter {iteration})")
         
-        # Start Mininet with collector
-        proc = subprocess.Popen([
-            "sudo", "python3", topo_script
-        ])
+        # Clean up any previous Mininet processes
+        subprocess.run("sudo mn -c 2>/dev/null", shell=True)
+        time.sleep(2)
         
-        time.sleep(15)  # wait for network + collector
+        try:
+            # Start Mininet-WiFi in background
+            proc = subprocess.Popen(
+                ["sudo", "python3", topo_script],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            
+            # Wait for network to stabilize
+            time.sleep(15)
+            
+            # Verify Mininet is running
+            check = subprocess.run(
+                "sudo mn -c 2>&1 | grep -q 'cleanup'",
+                shell=True
+            )
+            
+            if check.returncode != 0:
+                logger.warning("Mininet may not have started properly")
+            
+            # Run traffic command on sta1
+            # Use mininet CLI to execute command
+            cmd = f'sudo python3 -c "from mininet.net import Mininet; from mininet.cli import CLI; import time; net = Mininet.get(); if net: sta1 = net.get(\\"sta1\\"); sta1.cmd(\\"{scenario["command"]} &\\"); time.sleep({scenario["duration"]})"'
+            
+            # Simpler approach: use mnexec
+            cmd = f"sudo mnexec -a $(pgrep -f 'sta1$') {scenario['command']} &"
+            subprocess.run(cmd, shell=True)
+            
+            # Wait for traffic to complete
+            time.sleep(scenario['duration'])
+            
+        except Exception as e:
+            logger.error(f"Error running scenario: {e}")
         
-        # Run traffic command on sta1
-        cmd = scenario['command'].replace("{server}", "10.0.0.4")
-        subprocess.run(f"sudo mnexec -a 1 sta1 {cmd} &", shell=True)
+        finally:
+            # Stop Mininet
+            subprocess.run("sudo mn -c 2>/dev/null", shell=True)
+            proc.terminate()
+            time.sleep(5)
         
-        time.sleep(scenario['duration'])
-        
-        # Stop Mininet
-        subprocess.run("sudo pkill -f topology.py", shell=True)
-        time.sleep(5)
-        
-        # Find latest PCAP
-        latest = max(self.pcap_dir.glob("*.pcap*"), key=os.path.getctime, default=None)
-        if latest:
-            new_name = self.pcap_dir / f"{scenario['name']}_{iteration}.pcap"
-            shutil.move(str(latest), str(new_name))
-            return str(new_name)
-        
-        return "failed.pcap"
+        # Find latest PCAP in pcap_captures directory
+        try:
+            pcap_list = list(self.pcap_dir.glob("*.pcap*"))
+            if pcap_list:
+                # Get the most recent file
+                latest = max(pcap_list, key=os.path.getctime)
+                # Rename with scenario name
+                new_name = self.pcap_dir / f"{scenario['name']}_{iteration}.pcap"
+                if latest != new_name:
+                    shutil.move(str(latest), str(new_name))
+                logger.info(f"PCAP saved: {new_name}")
+                return str(new_name)
+            else:
+                logger.warning("No PCAP file generated")
+                return ""
+        except Exception as e:
+            logger.error(f"Error handling PCAP file: {e}")
+            return ""
     
     def generate_dataset(self, 
                         use_feature_extractor: bool = True,
-                        feature_extractor_path: str = "./feature_extractor.py"):
+                        feature_extractor_path: str = "../backend/feature_extractor.py"):
         """
         Generate complete training dataset
         
@@ -223,20 +209,21 @@ class MininetwifiScenarioGenerator:
                 # Run simulation and capture PCAP
                 pcap_file = self.run_scenario(scenario, i)
                 
-                # Store metadata
-                metadata = {
-                    'pcap_file': pcap_file,
-                    'scenario': scenario['name'],
-                    'label': scenario['label'],
-                    'bandwidth_label': scenario['bandwidth_label'],
-                    'bandwidth_kbps': scenario['bandwidth_kbps'],
-                    'timestamp': datetime.now().isoformat(),
-                    'iteration': i
-                }
-                all_metadata.append(metadata)
-                
-                if (i + 1) % 50 == 0:
-                    logger.info(f"  Completed {i+1}/{scenario['repeat']} iterations")
+                if pcap_file and os.path.exists(pcap_file):
+                    # Store metadata
+                    metadata = {
+                        'pcap_file': pcap_file,
+                        'scenario': scenario['name'],
+                        'label': scenario['label'],
+                        'bandwidth_label': scenario['bandwidth_label'],
+                        'bandwidth_kbps': scenario['bandwidth_kbps'],
+                        'timestamp': datetime.now().isoformat(),
+                        'iteration': i
+                    }
+                    all_metadata.append(metadata)
+                    logger.info(f"  Iteration {i+1}/{scenario['repeat']} completed")
+                else:
+                    logger.warning(f"  Iteration {i+1} failed - no PCAP generated")
         
         # Save metadata
         metadata_df = pd.DataFrame(all_metadata)
@@ -251,11 +238,15 @@ class MininetwifiScenarioGenerator:
         
         logger.info("\n=== Dataset Generation Complete ===")
         logger.info(f"Total samples: {len(metadata_df)}")
-        logger.info(f"Normal samples: {len(metadata_df[metadata_df['label'] == 'normal'])}")
-        logger.info(f"Anomaly samples: {len(metadata_df[metadata_df['label'] == 'anomaly'])}")
+        if len(metadata_df) > 0:
+            logger.info(f"Normal samples: {len(metadata_df[metadata_df['label'] == 'normal'])}")
+            logger.info(f"Anomaly samples: {len(metadata_df[metadata_df['label'] == 'anomaly'])}")
     
     def _process_pcaps_to_features(self, metadata_df: pd.DataFrame, extractor_path: str):
         """Process all PCAP files to extract features"""
+        import sys
+        sys.path.append(str(Path(extractor_path).parent))
+        
         from feature_extractor import process_pcap_file
         
         all_features = []
@@ -283,7 +274,7 @@ class MininetwifiScenarioGenerator:
             except Exception as e:
                 logger.error(f"Failed to process {pcap_file}: {e}")
             
-            if (idx + 1) % 100 == 0:
+            if (idx + 1) % 10 == 0:
                 logger.info(f"  Processed {idx+1}/{len(metadata_df)} PCAPs")
         
         # Combine all features
@@ -324,7 +315,6 @@ class PublicDatasetIntegrator:
             return pd.DataFrame()
         
         # Map CIC-IDS2017 columns to our feature names
-        # CIC-IDS2017 has pre-computed flow features
         column_mapping = {
             'Flow Duration': 'flow_duration',
             'Total Fwd Packets': 'total_packets',
@@ -341,7 +331,7 @@ class PublicDatasetIntegrator:
         available_cols = [col for col in column_mapping.keys() if col in df.columns]
         df_mapped = df[available_cols].rename(columns=column_mapping)
         
-        # Convert label to binary (BENIGN vs attacks)
+        # Convert label to binary
         df_mapped['label'] = df_mapped['label'].apply(
             lambda x: 'normal' if x == 'BENIGN' else 'anomaly'
         )
@@ -358,7 +348,7 @@ class PublicDatasetIntegrator:
         # Combine datasets
         combined_df = pd.concat([simulated_df, cicids_data], ignore_index=True)
         
-        # Balance classes if needed
+        # Balance classes
         combined_df = self._balance_classes(combined_df)
         
         output_file = self.output_dir / "combined_training_dataset.csv"
@@ -392,6 +382,12 @@ class PublicDatasetIntegrator:
 
 # Main execution
 if __name__ == "__main__":
+    import sys
+    
+    # Check if running from correct directory
+    current_dir = Path.cwd()
+    logger.info(f"Current directory: {current_dir}")
+    
     # Step 1: Generate simulated data
     generator = MininetwifiScenarioGenerator()
     generator.generate_dataset(use_feature_extractor=True)
@@ -399,8 +395,8 @@ if __name__ == "__main__":
     # Step 2: Integrate public dataset (if available)
     integrator = PublicDatasetIntegrator()
     
-    # Example: Process CIC-IDS2017 (if you have the dataset)
-    cicids_path = "./external_datasets/CICIDS2017_sample.csv"
+    # Example: Process CIC-IDS2017
+    cicids_path = "./training_data/CICIDS2017_sample.csv"
     if os.path.exists(cicids_path):
         cicids_data = integrator.process_cicids2017(cicids_path)
         final_dataset = integrator.merge_with_simulated_data(
