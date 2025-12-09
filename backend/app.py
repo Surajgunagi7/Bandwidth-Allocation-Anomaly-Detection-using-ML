@@ -53,7 +53,7 @@ def pcap_processing_worker():
 
                 seen_files.add(pcap_file.name)
                 if len(seen_files) > 200:
-                    seen_files = set(list(seen_files)[-200:])  # keep memory low
+                    seen_files = set(list(seen_files)[-200:])  
 
             time.sleep(config.PROCESSING_INTERVAL)
 

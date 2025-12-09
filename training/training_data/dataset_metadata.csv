@@ -1,0 +1,11 @@
+pcap_file,scenario,label,bandwidth_label,bandwidth_kbps,timestamp,iteration,file_size_bytes
+training_data/pcap_captures/light_browsing_0.pcap,light_browsing,normal,low,500,2025-12-10T01:31:44.381427,0,5448
+training_data/pcap_captures/light_browsing_1.pcap,light_browsing,normal,low,500,2025-12-10T01:34:11.895509,1,2440
+training_data/pcap_captures/video_streaming_0.pcap,video_streaming,normal,medium,3000,2025-12-10T01:35:19.896184,0,2440
+training_data/pcap_captures/video_streaming_1.pcap,video_streaming,normal,medium,3000,2025-12-10T01:36:27.979489,1,2440
+training_data/pcap_captures/voip_call_0.pcap,voip_call,normal,low,128,2025-12-10T01:37:36.308814,0,2440
+training_data/pcap_captures/voip_call_1.pcap,voip_call,normal,low,128,2025-12-10T01:38:45.800513,1,2440
+training_data/pcap_captures/file_download_0.pcap,file_download,normal,high,8000,2025-12-10T01:39:55.642147,0,3196
+training_data/pcap_captures/file_download_1.pcap,file_download,normal,high,8000,2025-12-10T01:41:06.508971,1,3620
+training_data/pcap_captures/bandwidth_hog_0.pcap,bandwidth_hog,anomaly,extreme,80000,2025-12-10T01:42:16.356101,0,3620
+training_data/pcap_captures/bandwidth_hog_1.pcap,bandwidth_hog,anomaly,extreme,80000,2025-12-10T01:43:26.914989,1,3620

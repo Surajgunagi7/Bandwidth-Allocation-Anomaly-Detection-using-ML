@@ -149,8 +149,7 @@ class PCAPFeatureExtractor:
     
     def _create_flow_key(self, src_mac, dst_mac, src_ip, dst_ip, protocol) -> str:
         """Create unique flow identifier (aggregate by source MAC)"""
-        # return f"{src_mac}_{protocol}"
-        return src_mac # Just use MAC — we don’t care about protocol for per-device view
+        return f"{src_mac}_{protocol}"
     
     def _compute_features(self) -> pd.DataFrame:
         """Compute features from aggregated flows"""

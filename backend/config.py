@@ -137,6 +137,8 @@ class Config:
         print(f"Base Directory: {cls.BASE_DIR}")
         print(f"Models Directory: {cls.MODELS_DIR}")
         print(f"Upload Directory: {cls.UPLOAD_DIR}")
+        print(f"Processed Directory: {cls.PROCESSED_DIR}")
+        print(f"Logs Directory: {cls.LOGS_DIR}")
         print(f"Network Interface: {cls.AP_INTERFACE}")
         print(f"Total Bandwidth: {cls.TOTAL_BANDWIDTH_MBPS} Mbps")
         print(f"Flask Debug: {cls.DEBUG}")
