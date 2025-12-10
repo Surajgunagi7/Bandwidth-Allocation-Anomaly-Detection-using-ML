@@ -34,7 +34,8 @@ class MLModelManager:
         self.models_dir = Path(models_dir)
         self.bandwidth_model = None
         self.anomaly_model = None
-        self.feature_scaler = None
+        self.bandwidth_scaler = None
+        self.anomaly_scaler = None
         
         self._load_models()
     
@@ -43,7 +44,8 @@ class MLModelManager:
         try:
             bandwidth_model_path = self.models_dir / "bandwidth_predictor.pkl"
             anomaly_model_path = self.models_dir / "anomaly_detector.pkl"
-            scaler_path = self.models_dir / "feature_scaler.pkl"
+            bandwidth_scaler_path = self.models_dir / "bandwidth_scaler.pkl"
+            anomaly_scaler_path = self.models_dir / "anomaly_scaler.pkl"
             
             if bandwidth_model_path.exists():
                 self.bandwidth_model = joblib.load(bandwidth_model_path)
@@ -57,9 +59,17 @@ class MLModelManager:
             else:
                 logger.warning(f"Anomaly model not found at {anomaly_model_path}")
             
-            if scaler_path.exists():
-                self.feature_scaler = joblib.load(scaler_path)
-                logger.info("Loaded feature scaler")
+            if bandwidth_scaler_path.exists():
+                self.bandwidth_scaler = joblib.load(bandwidth_scaler_path)
+                logger.info("Loaded bandwidth feature scaler")
+            else:
+                logger.warning(f"Bandwidth scaler not found at {bandwidth_scaler_path}")
+            
+            if anomaly_scaler_path.exists():
+                self.anomaly_scaler = joblib.load(anomaly_scaler_path)
+                logger.info("Loaded anomaly feature scaler")
+            else:
+                logger.warning(f"Anomaly scaler not found at {anomaly_scaler_path}")
             
         except Exception as e:
             logger.error(f"Failed to load models: {e}")
@@ -88,13 +98,30 @@ class MLModelManager:
                 'is_encrypted', 'time_of_day'
             ]
             
-            X = features_df[bandwidth_features]
+            # Separate numeric and categorical features
+            numeric_features = [f for f in bandwidth_features if f != 'protocol_type']
             
-            # Scale features if scaler available
-            if self.feature_scaler is not None:
-                X_scaled = self.feature_scaler.transform(X)
+            X = features_df[bandwidth_features].copy()
+            
+            # Scale only numeric features if scaler available
+            if self.bandwidth_scaler is not None:
+                X_numeric = X[numeric_features]
+                X_numeric_scaled = self.bandwidth_scaler.transform(X_numeric)
+                
+                # Create DataFrame with scaled numeric features
+                X_scaled_df = pd.DataFrame(
+                    X_numeric_scaled,
+                    columns=numeric_features,
+                    index=X.index
+                )
+                
+                # Add back protocol_type (unscaled)
+                X_scaled_df['protocol_type'] = X['protocol_type'].values
+                
+                # Reorder to match original feature order
+                X_scaled = X_scaled_df[bandwidth_features].values
             else:
-                X_scaled = X
+                X_scaled = X.values
             
             # Predict
             predictions = self.bandwidth_model.predict(X_scaled)
@@ -104,13 +131,14 @@ class MLModelManager:
             result_df['predicted_bandwidth_kbps'] = predictions
             
             # Ensure positive values
-            result_df['predicted_bandwidth_kbps'] = result_df['predicted_bandwidth_kbps'].round().astype(int)
+            result_df['predicted_bandwidth_kbps'] = result_df['predicted_bandwidth_kbps'].clip(lower=0).round().astype(int)
             
             logger.info(f"Predicted bandwidth for {len(result_df)} devices")
             return result_df
             
         except Exception as e:
             logger.error(f"Bandwidth prediction failed: {e}")
+            logger.exception("Full traceback:")
             return pd.DataFrame()
     
     def detect_anomalies(self, features_df: pd.DataFrame) -> pd.DataFrame:
@@ -139,13 +167,30 @@ class MLModelManager:
                 'packet_size_variance', 'protocol_diversity'
             ]
             
-            X = features_df[anomaly_features]
+            # Separate numeric and categorical features
+            numeric_features = [f for f in anomaly_features if f != 'protocol_type']
             
-            # Scale features
-            if self.feature_scaler is not None:
-                X_scaled = self.feature_scaler.transform(X)
+            X = features_df[anomaly_features].copy()
+            
+            # Scale only numeric features if scaler available
+            if self.anomaly_scaler is not None:
+                X_numeric = X[numeric_features]
+                X_numeric_scaled = self.anomaly_scaler.transform(X_numeric)
+                
+                # Create DataFrame with scaled numeric features
+                X_scaled_df = pd.DataFrame(
+                    X_numeric_scaled,
+                    columns=numeric_features,
+                    index=X.index
+                )
+                
+                # Add back protocol_type (unscaled)
+                X_scaled_df['protocol_type'] = X['protocol_type'].values
+                
+                # Reorder to match original feature order
+                X_scaled = X_scaled_df[anomaly_features].values
             else:
-                X_scaled = X
+                X_scaled = X.values
             
             # Predict anomalies (-1 for anomaly, 1 for normal in Isolation Forest)
             predictions = self.anomaly_model.predict(X_scaled)
@@ -163,6 +208,7 @@ class MLModelManager:
             
         except Exception as e:
             logger.error(f"Anomaly detection failed: {e}")
+            logger.exception("Full traceback:")
             return pd.DataFrame()
     
     def classify_traffic(self, features_df: pd.DataFrame) -> pd.DataFrame:

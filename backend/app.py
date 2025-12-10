@@ -5,7 +5,7 @@ from werkzeug.utils import secure_filename
 import os
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, UTC
 import threading
 import time
 import shutil
@@ -174,7 +174,7 @@ worker_thread.start()
 
 # Helper
 def generate_filename(original_filename):
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
     secure_name = secure_filename(original_filename or "capture.pcap")
     if not any(secure_name.lower().endswith(ext) for ext in config.ALLOWED_EXTENSIONS):
         secure_name += ".pcap"
@@ -226,7 +226,7 @@ def traffic():
             "status": "success",
             "filename": saved_path.name,
             "size_bytes": saved_path.stat().st_size,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }), 200
 
     except Exception as e:

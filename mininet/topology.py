@@ -110,8 +110,8 @@ def topology(start_collector=False):
         else:
             info(f"Collector not found: {collector_path}\n")
 
-    info("*** Testing connectivity\n")
-    net.pingAll()
+    # info("*** Testing connectivity\n")
+    # net.pingAll()
 
     info("*** Running CLI\n   ")
     CLI(net)

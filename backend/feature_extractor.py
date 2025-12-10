@@ -8,7 +8,7 @@ from scapy.all import rdpcap, IP, TCP, UDP, ICMP
 from collections import defaultdict
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime,UTC
 import hashlib
 import logging
 from typing import Dict, List, Tuple
