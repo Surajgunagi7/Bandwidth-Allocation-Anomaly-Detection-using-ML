@@ -8,7 +8,7 @@ venv/
 *.sqlite3
 env
 
-
+*.csv
 
 # Python
 __pycache__/
