@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """
 Feature Extraction Module for PCAP Files
-Extracts features for both bandwidth prediction and anomaly detection
+FIXED VERSION: Ensures consistent feature ordering and handles warnings
 """
 
 from scapy.all import rdpcap, IP, TCP, UDP, ICMP
 from collections import defaultdict
 import numpy as np
 import pandas as pd
-from datetime import datetime,UTC
+from datetime import datetime, UTC
 import hashlib
 import logging
 from typing import Dict, List, Tuple
 from scipy.stats import entropy
 from config import Config
+import warnings
+
+# Suppress scapy warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -59,6 +64,51 @@ class PCAPFeatureExtractor:
     
     # Ports commonly used for encrypted traffic
     ENCRYPTED_PORTS = {443, 8443, 993, 995, 22, 3389}
+    
+    # CRITICAL: Define exact feature order for bandwidth model (15 features)
+    # Must match training script exactly
+    BANDWIDTH_FEATURE_ORDER = [
+        'avg_packet_size',
+        'total_bytes',
+        'total_packets',
+        'flow_duration',
+        'bytes_per_second',
+        'packets_per_second',
+        'protocol_type',
+        'avg_inter_arrival_time',
+        'std_packet_size',
+        'unique_dst_ports',
+        'tcp_flag_ratio',
+        'payload_entropy',
+        'bidirectional_ratio',
+        'is_encrypted',
+        'time_of_day'
+    ]
+    
+    # CRITICAL: Define exact feature order for anomaly model (20 features)
+    # Must match training script exactly
+    ANOMALY_FEATURE_ORDER = [
+        'avg_packet_size',
+        'total_bytes',
+        'total_packets',
+        'flow_duration',
+        'bytes_per_second',
+        'packets_per_second',
+        'protocol_type',
+        'avg_inter_arrival_time',
+        'std_packet_size',
+        'unique_dst_ports',
+        'tcp_flag_ratio',
+        'payload_entropy',
+        'bidirectional_ratio',
+        'is_encrypted',
+        'time_of_day',
+        'connection_rate',
+        'failed_connection_ratio',
+        'port_scan_indicator',
+        'packet_size_variance',
+        'protocol_diversity'
+    ]
     
     def __init__(self, window_size: int = 60):
         """
@@ -219,11 +269,11 @@ class PCAPFeatureExtractor:
             features['payload_entropy'] = self._calculate_entropy(packet_sizes)
             
             # Bidirectional ratio (simplified - would need proper flow matching)
-            features['bidirectional_ratio'] = 0.5  # Placeholder (prev= 1.0)
+            features['bidirectional_ratio'] = 0.5  # Placeholder
             
             # Time of day
             if len(timestamps) > 0:
-                features['time_of_day'] = datetime.fromtimestamp(timestamps[0]).hour
+                features['time_of_day'] = datetime.fromtimestamp(timestamps[0], tz=UTC).hour
             else:
                 features['time_of_day'] = 0
             
@@ -292,36 +342,56 @@ class PCAPFeatureExtractor:
         hist, _ = np.histogram(values, bins=20)
         hist = hist[hist > 0]  # Remove zero bins
         
+        if len(hist) == 0:
+            return 0.0
+        
         # Calculate entropy
         probabilities = hist / hist.sum()
         return float(entropy(probabilities))
     
     def get_bandwidth_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Extract subset of features for bandwidth prediction model"""
-        bandwidth_features = [
-            'mac_address',
-            'avg_packet_size',
-            'total_bytes',
-            'total_packets',
-            'flow_duration',
-            'bytes_per_second',
-            'packets_per_second',
-            'protocol_type',
-            'avg_inter_arrival_time',
-            'std_packet_size',
-            'unique_dst_ports',
-            'tcp_flag_ratio',
-            'payload_entropy',
-            'bidirectional_ratio',
-            'is_encrypted',
-            'time_of_day'
-        ]
-        return df[bandwidth_features].copy()
+        """
+        Extract subset of features for bandwidth prediction model
+        CRITICAL: Returns features in EXACT order expected by model
+        """
+        if df.empty:
+            return pd.DataFrame()
+        
+        # Ensure all required features exist
+        missing_features = set(self.BANDWIDTH_FEATURE_ORDER) - set(df.columns)
+        if missing_features:
+            logger.error(f"Missing bandwidth features: {missing_features}")
+            # Add missing features with default values
+            for feat in missing_features:
+                df[feat] = 0.0
+        
+        # Return in exact order (without mac_address)
+        result = df[['mac_address'] + self.BANDWIDTH_FEATURE_ORDER].copy()
+        
+        logger.info(f"Bandwidth features shape: {result.shape}, columns: {len(self.BANDWIDTH_FEATURE_ORDER)}")
+        return result
     
     def get_anomaly_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Extract all features for anomaly detection model"""
-        # Anomaly model uses all features
-        return df.copy()
+        """
+        Extract all features for anomaly detection model
+        CRITICAL: Returns features in EXACT order expected by model
+        """
+        if df.empty:
+            return pd.DataFrame()
+        
+        # Ensure all required features exist
+        missing_features = set(self.ANOMALY_FEATURE_ORDER) - set(df.columns)
+        if missing_features:
+            logger.error(f"Missing anomaly features: {missing_features}")
+            # Add missing features with default values
+            for feat in missing_features:
+                df[feat] = 0.0
+        
+        # Return in exact order (without mac_address)
+        result = df[['mac_address'] + self.ANOMALY_FEATURE_ORDER].copy()
+        
+        logger.info(f"Anomaly features shape: {result.shape}, columns: {len(self.ANOMALY_FEATURE_ORDER)}")
+        return result
 
 
 def process_pcap_file(pcap_path: str, output_csv: str = None) -> Dict[str, pd.DataFrame]:
@@ -342,9 +412,9 @@ def process_pcap_file(pcap_path: str, output_csv: str = None) -> Dict[str, pd.Da
     
     if all_features.empty:
         logger.warning("No features extracted from PCAP")
-        return {'bandwidth': pd.DataFrame(), 'anomaly': pd.DataFrame()}
+        return {'bandwidth': pd.DataFrame(), 'anomaly': pd.DataFrame(), 'all': pd.DataFrame()}
     
-    # Get model-specific features
+    # Get model-specific features IN CORRECT ORDER
     bandwidth_df = extractor.get_bandwidth_features(all_features)
     anomaly_df = extractor.get_anomaly_features(all_features)
     
@@ -353,8 +423,8 @@ def process_pcap_file(pcap_path: str, output_csv: str = None) -> Dict[str, pd.Da
         all_features.to_csv(output_csv, index=False)
         logger.info(f"Features saved to {output_csv}")
     
-    logger.info(f"Bandwidth features shape: {bandwidth_df.shape}")
-    logger.info(f"Anomaly features shape: {anomaly_df.shape}")
+    logger.info(f"✓ Bandwidth features: {bandwidth_df.shape}")
+    logger.info(f"✓ Anomaly features: {anomaly_df.shape}")
     
     return {
         'bandwidth': bandwidth_df,

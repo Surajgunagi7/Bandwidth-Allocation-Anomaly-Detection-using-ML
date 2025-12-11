@@ -23,7 +23,7 @@ python-dotenv==1.2.1
 pytz==2025.2
 requests==2.32.5
 scapy==2.6.1
-scikit-learn==1.7.2
+scikit-learn==1.6.1
 scipy==1.16.3
 six==1.17.0
 termcolor==3.2.0
