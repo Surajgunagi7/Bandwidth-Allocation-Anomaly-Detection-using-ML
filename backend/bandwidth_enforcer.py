@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Bandwidth Enforcement Module
-Translates ML predictions to Linux TC commands and enforces them on AP interfaces
+Bandwidth Enforcement Module - FIXED VERSION
+Fixes: TC initialization errors, better error handling, permission checks
 """
 
 import subprocess
@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import time
 import json
 from config import Config
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,32 +41,99 @@ class TrafficController:
         self.root_handle = "1:"
         self.initialized = False
         
+        # Verify interface exists
+        if not self._verify_interface():
+            logger.error(f"❌ Interface {interface} not found!")
+            logger.info("Available interfaces:")
+            self._list_interfaces()
+        
+        # Check TC permissions
+        if not self._check_tc_permissions():
+            logger.error("❌ Insufficient permissions for TC commands")
+            logger.info("Run with: sudo python app.py")
+    
+    def _verify_interface(self) -> bool:
+        """Verify network interface exists"""
+        try:
+            result = subprocess.run(
+                f"ip link show {self.interface}",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception as e:
+            logger.error(f"Failed to verify interface: {e}")
+            return False
+    
+    def _list_interfaces(self):
+        """List available network interfaces"""
+        try:
+            result = subprocess.run(
+                "ip link show",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            logger.info(f"Interfaces:\n{result.stdout}")
+        except Exception as e:
+            logger.error(f"Failed to list interfaces: {e}")
+    
+    def _check_tc_permissions(self) -> bool:
+        """Check if we have permissions to run TC commands"""
+        try:
+            # Try a harmless TC command
+            result = subprocess.run(
+                "tc qdisc show",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception as e:
+            logger.error(f"TC permission check failed: {e}")
+            return False
+    
     def initialize_qdisc(self, total_bandwidth_mbps: int = None):
         """
         Initialize HTB (Hierarchical Token Bucket) qdisc on interface
-        
-        Args:
-            total_bandwidth_mbps: Total available bandwidth in Mbps
+        FIXED: Better error handling and verification
         """
         if total_bandwidth_mbps is None:
             total_bandwidth_mbps = getattr(Config, "TOTAL_BANDWIDTH_MBPS", 100)
+        
         try:
-            # Remove existing qdiscs
+            logger.info(f"🔧 Initializing TC on interface: {self.interface}")
+            
+            # Step 1: Remove existing qdiscs (suppress errors if none exist)
             subprocess.run(
                 f"tc qdisc del dev {self.interface} root 2>/dev/null",
-                shell=True
+                shell=True,
+                timeout=5
             )
+            logger.debug("✓ Cleaned existing TC rules")
             
-            # Add root HTB qdisc
+            # Step 2: Add root HTB qdisc
             total_bw_kbit = total_bandwidth_mbps * 1000
             cmd = f"tc qdisc add dev {self.interface} root handle {self.root_handle} htb default 30"
-            subprocess.run(cmd, shell=True, check=True)
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
             
-            # Add root class with total bandwidth
+            if result.returncode != 0:
+                raise Exception(f"Failed to add root qdisc: {result.stderr}")
+            logger.debug("✓ Added root HTB qdisc")
+            
+            # Step 3: Add root class with total bandwidth
             cmd = f"tc class add dev {self.interface} parent {self.root_handle} classid 1:1 htb rate {total_bw_kbit}kbit"
-            subprocess.run(cmd, shell=True, check=True)
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
             
-            # Create priority classes (1:10, 1:20, 1:30)
+            if result.returncode != 0:
+                raise Exception(f"Failed to add root class: {result.stderr}")
+            logger.debug(f"✓ Added root class ({total_bandwidth_mbps} Mbps)")
+            
+            # Step 4: Create priority classes (1:10, 1:20, 1:30)
             priorities = {
                 "1:10": int(total_bw_kbit * 0.5),  # High priority: 50%
                 "1:20": int(total_bw_kbit * 0.3),  # Medium priority: 30%
@@ -74,14 +142,45 @@ class TrafficController:
             
             for classid, rate in priorities.items():
                 cmd = f"tc class add dev {self.interface} parent 1:1 classid {classid} htb rate {rate}kbit ceil {total_bw_kbit}kbit"
-                subprocess.run(cmd, shell=True, check=True)
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+                
+                if result.returncode != 0:
+                    raise Exception(f"Failed to add priority class {classid}: {result.stderr}")
+                logger.debug(f"✓ Added priority class {classid} ({rate} kbit)")
             
             self.initialized = True
-            logger.info(f"TC initialized on {self.interface} with {total_bandwidth_mbps}Mbps")
+            logger.info(f"✅ TC initialized successfully on {self.interface} with {total_bandwidth_mbps} Mbps")
             
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to initialize TC: {e}")
+            # Verify initialization
+            self._verify_tc_setup()
+            
+        except subprocess.TimeoutExpired:
+            logger.error("❌ TC command timed out - check system load")
             raise
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize TC: {e}")
+            logger.info("Troubleshooting:")
+            logger.info("1. Check if running with sudo: sudo python app.py")
+            logger.info("2. Verify interface exists: ip link show")
+            logger.info("3. Check kernel modules: lsmod | grep sch_htb")
+            raise
+    
+    def _verify_tc_setup(self):
+        """Verify TC was set up correctly"""
+        try:
+            result = subprocess.run(
+                f"tc qdisc show dev {self.interface}",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if "htb" in result.stdout:
+                logger.debug("✓ TC setup verified (HTB found)")
+            else:
+                logger.warning("⚠ TC setup may be incomplete")
+        except Exception as e:
+            logger.warning(f"Could not verify TC setup: {e}")
     
     def _get_classid_for_priority(self, priority: int) -> str:
         """Map priority level to TC class ID"""
@@ -95,17 +194,28 @@ class TrafficController:
     def apply_allocation(self, allocation: BandwidthAllocation):
         """
         Apply bandwidth allocation for a specific MAC address
-        
-        Args:
-            allocation: BandwidthAllocation object with MAC and bandwidth details
+        FIXED: Better error handling and validation
         """
         if not self.initialized:
-            logger.warning("TC not initialized. Initializing with defaults...")
-            self.initialize_qdisc()
+            logger.warning("⚠ TC not initialized. Initializing with defaults...")
+            try:
+                self.initialize_qdisc()
+            except Exception as e:
+                logger.error(f"❌ Cannot initialize TC: {e}")
+                return
         
         mac = allocation.mac_address.lower()
         bw_kbps = allocation.allocated_bw_kbps
         priority = allocation.priority
+        
+        # Validate inputs
+        if bw_kbps <= 0:
+            logger.error(f"❌ Invalid bandwidth for {mac}: {bw_kbps} kbps")
+            return
+        
+        if priority not in [1, 2, 3]:
+            logger.error(f"❌ Invalid priority for {mac}: {priority}")
+            return
         
         try:
             # Generate unique handle for this MAC
@@ -116,65 +226,90 @@ class TrafficController:
             # Remove existing class for this MAC if exists
             if mac in self.active_allocations:
                 old_handle = f"1:{100 + abs(hash(mac)) % 10000}"
+                
+                # Delete old filters
+                subprocess.run(
+                    f"tc filter del dev {self.interface} parent {self.root_handle} prio {priority} 2>/dev/null",
+                    shell=True,
+                    timeout=5
+                )
+                
+                # Delete old class
                 subprocess.run(
                     f"tc class del dev {self.interface} classid {old_handle} 2>/dev/null",
-                    shell=True
+                    shell=True,
+                    timeout=5
                 )
-                subprocess.run(
-                    f"tc filter del dev {self.interface} protocol ip parent {self.root_handle} 2>/dev/null",
-                    shell=True
-                )
+                logger.debug(f"✓ Removed old allocation for {mac}")
             
             # Add class for this device with allocated bandwidth
-            cmd = f"tc class add dev {self.interface} parent {parent_class} classid {handle} htb rate {bw_kbps}kbit ceil {bw_kbps * 2}kbit"
-            subprocess.run(cmd, shell=True, check=True)
+            ceil_bw = min(bw_kbps * 2, 100000)  # Ceil at 2x rate or 100 Mbps
+            cmd = f"tc class add dev {self.interface} parent {parent_class} classid {handle} htb rate {bw_kbps}kbit ceil {ceil_bw}kbit"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
             
-            # Add filter to match MAC address
-            # Shape UPLOAD (client → AP → internet)
-            # Shape UPLOAD (client → AP → internet)
+            if result.returncode != 0:
+                raise Exception(f"Failed to add class: {result.stderr}")
+            logger.debug(f"✓ Added class {handle} for {mac}")
+            
+            # Add filter to match MAC address for upload (src MAC)
             cmd_up = f"tc filter add dev {self.interface} protocol ip parent {self.root_handle} prio {priority} u32 match ether src {mac} flowid {handle}"
-            subprocess.run(cmd_up, shell=True, check=True)
-
-            # Shape DOWNLOAD (internet → AP → client) — optional but recommended
-            # Use 80% of allocated rate to prevent bufferbloat
-            download_rate = int(bw_kbps * 0.8)
+            result = subprocess.run(cmd_up, shell=True, capture_output=True, text=True, timeout=5)
+            
+            if result.returncode != 0:
+                logger.warning(f"⚠ Upload filter failed for {mac}: {result.stderr}")
+            else:
+                logger.debug(f"✓ Added upload filter for {mac}")
+            
+            # Add filter for download (dst MAC)
             cmd_down = f"tc filter add dev {self.interface} protocol ip parent {self.root_handle} prio {priority} u32 match ether dst {mac} flowid {handle}"
-            subprocess.run(cmd_down, shell=True, check=True)
+            result = subprocess.run(cmd_down, shell=True, capture_output=True, text=True, timeout=5)
+            
+            if result.returncode != 0:
+                logger.warning(f"⚠ Download filter failed for {mac}: {result.stderr}")
+            else:
+                logger.debug(f"✓ Added download filter for {mac}")
             
             # Store allocation
             self.active_allocations[mac] = allocation
-            logger.info(f"Applied {bw_kbps}kbps (priority {priority}) to MAC {mac}")
+            logger.info(f"✅ Applied {bw_kbps} kbps (priority {priority}) to MAC {mac}")
             
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to apply allocation for {mac}: {e}")
+        except subprocess.TimeoutExpired:
+            logger.error(f"❌ TC command timed out for {mac}")
+        except Exception as e:
+            logger.error(f"❌ Failed to apply allocation for {mac}: {e}")
     
     def remove_allocation(self, mac_address: str):
         """Remove bandwidth allocation for a MAC address"""
         mac = mac_address.lower()
         
         if mac not in self.active_allocations:
-            logger.warning(f"No active allocation for {mac}")
+            logger.warning(f"⚠ No active allocation for {mac}")
             return
         
         try:
             mac_hash = abs(hash(mac)) % 10000
             handle = f"1:{100 + mac_hash}"
+            priority = self.active_allocations[mac].priority
             
-            # Remove class and filters
+            # Remove filters
+            subprocess.run(
+                f"tc filter del dev {self.interface} parent {self.root_handle} prio {priority} 2>/dev/null",
+                shell=True,
+                timeout=5
+            )
+            
+            # Remove class
             subprocess.run(
                 f"tc class del dev {self.interface} classid {handle} 2>/dev/null",
-                shell=True
-            )
-            subprocess.run(
-                f"tc filter del dev {self.interface} protocol ip parent {self.root_handle} 2>/dev/null",
-                shell=True
+                shell=True,
+                timeout=5
             )
             
             del self.active_allocations[mac]
-            logger.info(f"Removed allocation for {mac}")
+            logger.info(f"✓ Removed allocation for {mac}")
             
         except Exception as e:
-            logger.error(f"Failed to remove allocation for {mac}: {e}")
+            logger.error(f"❌ Failed to remove allocation for {mac}: {e}")
     
     def get_stats(self) -> Dict:
         """Get current TC statistics"""
@@ -183,23 +318,25 @@ class TrafficController:
                 f"tc -s class show dev {self.interface}",
                 shell=True,
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=5
             )
-            return {"raw_stats": result.stdout}
+            return {"raw_stats": result.stdout, "success": result.returncode == 0}
         except Exception as e:
             logger.error(f"Failed to get stats: {e}")
-            return {}
+            return {"raw_stats": "", "success": False, "error": str(e)}
     
     def cleanup(self):
         """Remove all TC configurations"""
         try:
             subprocess.run(
                 f"tc qdisc del dev {self.interface} root 2>/dev/null",
-                shell=True
+                shell=True,
+                timeout=5
             )
             self.active_allocations.clear()
             self.initialized = False
-            logger.info(f"Cleaned up TC on {self.interface}")
+            logger.info(f"✓ Cleaned up TC on {self.interface}")
         except Exception as e:
             logger.error(f"Cleanup failed: {e}")
 
@@ -224,23 +361,29 @@ class BandwidthDecisionEngine:
         self.change_threshold = change_threshold
         self.ap_mac = None  # Will be detected at runtime
         
+        # Try to initialize TC at startup
+        try:
+            self.tc_controller.initialize_qdisc()
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize TC at startup: {e}")
+            logger.warning("⚠ Bandwidth enforcement will not work until TC is initialized")
+    
     def detect_ap_mac(self) -> Optional[str]:
-        """
-        Detect AP's MAC address from interface
-        """
+        """Detect AP's MAC address from interface"""
         try:
             result = subprocess.run(
                 f"ip link show {self.tc_controller.interface}",
                 shell=True,
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=5
             )
             # Parse MAC from output like "link/ether aa:bb:cc:dd:ee:ff"
             for line in result.stdout.split('\n'):
                 if 'link/ether' in line:
                     mac = line.split()[1]
                     self.ap_mac = mac.lower()
-                    logger.info(f"Detected AP MAC: {self.ap_mac}")
+                    logger.info(f"✓ Detected AP MAC: {self.ap_mac}")
                     return self.ap_mac
         except Exception as e:
             logger.error(f"Failed to detect AP MAC: {e}")
@@ -249,9 +392,7 @@ class BandwidthDecisionEngine:
     def should_update(self, 
                      old_allocation: Optional[BandwidthAllocation],
                      new_allocation: BandwidthAllocation) -> bool:
-        """
-        Determine if allocation should be updated based on threshold
-        """
+        """Determine if allocation should be updated based on threshold"""
         if old_allocation is None:
             return True  # New device
         
@@ -266,16 +407,7 @@ class BandwidthDecisionEngine:
                 old_allocation.priority != new_allocation.priority)
     
     def process_ml_predictions(self, predictions: List[Dict]):
-        """
-        Process ML model predictions and enforce bandwidth allocations
-        
-        Args:
-            predictions: List of dicts with keys:
-                - mac_address: Device MAC
-                - predicted_bandwidth_kbps: Predicted bandwidth requirement
-                - traffic_class: e.g., 'video', 'web', 'bulk'
-                - is_anomaly: Boolean flag from anomaly detection
-        """
+        """Process ML model predictions and enforce bandwidth allocations"""
         if self.ap_mac is None:
             self.detect_ap_mac()
         
@@ -298,8 +430,9 @@ class BandwidthDecisionEngine:
             # Cap bandwidth if anomaly detected
             predicted_bw = pred['predicted_bandwidth_kbps']
             if pred.get('is_anomaly', False):
-                predicted_bw = min(predicted_bw, 1000)  # Cap at 1 Mbps for anomalies
-                logger.warning(f"Anomaly detected for {mac}, capping bandwidth")
+                cap = getattr(Config, 'ANOMALY_BANDWIDTH_CAP', 1000)
+                predicted_bw = min(predicted_bw, cap)
+                logger.warning(f"⚠ Anomaly detected for {mac}, capping bandwidth to {cap} kbps")
             
             # Create allocation
             allocation = BandwidthAllocation(
@@ -318,15 +451,10 @@ class BandwidthDecisionEngine:
         for allocation in allocations_to_apply:
             self.tc_controller.apply_allocation(allocation)
         
-        logger.info(f"Processed {len(predictions)} predictions, applied {len(allocations_to_apply)} updates")
+        logger.info(f"✓ Processed {len(predictions)} predictions, applied {len(allocations_to_apply)} updates")
     
     def _classify_priority(self, traffic_class: str, is_anomaly: bool) -> int:
-        """
-        Map traffic class to priority level
-        
-        Returns:
-            1 (high), 2 (medium), or 3 (low)
-        """
+        """Map traffic class to priority level"""
         if is_anomaly:
             return 3  # Lowest priority for anomalies
         
@@ -343,16 +471,17 @@ class BandwidthDecisionEngine:
         return priority_map.get(traffic_class.lower(), 2)
     
     def run_enforcement_loop(self, get_predictions_fn):
-        """
-        Main enforcement loop - calls ML prediction function periodically
-        
-        Args:
-            get_predictions_fn: Function that returns list of prediction dicts
-        """
+        """Main enforcement loop - calls ML prediction function periodically"""
         # Initialize TC
-        self.tc_controller.initialize_qdisc(total_bandwidth_mbps=100)
+        try:
+            self.tc_controller.initialize_qdisc(
+                total_bandwidth_mbps=getattr(Config, 'TOTAL_BANDWIDTH_MBPS', 100)
+            )
+        except Exception as e:
+            logger.error(f"❌ Cannot start enforcement loop: TC initialization failed")
+            return
         
-        logger.info(f"Starting enforcement loop (interval: {self.update_interval}s)")
+        logger.info(f"▶️ Starting enforcement loop (interval: {self.update_interval}s)")
         
         try:
             while True:
@@ -388,20 +517,6 @@ if __name__ == "__main__":
                 'traffic_class': 'video_conference',
                 'is_anomaly': False,
                 'ip_address': '10.0.0.2'
-            },
-            {
-                'mac_address': '00:11:22:33:44:66',
-                'predicted_bandwidth_kbps': 2000,
-                'traffic_class': 'web',
-                'is_anomaly': False,
-                'ip_address': '10.0.0.3'
-            },
-            {
-                'mac_address': '00:11:22:33:44:77',
-                'predicted_bandwidth_kbps': 10000,
-                'traffic_class': 'bulk',
-                'is_anomaly': True,  # Detected anomaly
-                'ip_address': '10.0.0.4'
             }
         ]
     
