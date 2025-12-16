@@ -34,8 +34,15 @@ pipeline = PipelineController(
     update_interval=config.TC_UPDATE_INTERVAL
 )
 
+worker_thread = None
+worker_lock = threading.Lock()
+
+worker_restart_count = 0
+last_worker_restart = None
+
 file_lock = threading.Lock()
 
+pipeline_lock = threading.RLock()
 
 def pcap_processing_worker():
     """Background worker for PCAP processing"""
@@ -44,7 +51,7 @@ def pcap_processing_worker():
     FILE_STABLE_TIME = 2.0
     MAX_FILES_PER_BATCH = 5
     CLEANUP_THRESHOLD = 500
-
+    
     while True:
         try:
             with file_lock:
@@ -59,12 +66,16 @@ def pcap_processing_worker():
                 current_time = time.time()
                 
                 for pcap_file in pcap_files:
-                    if pcap_file.name in processed_files:
+                    file_stat = pcap_file.stat()
+                    file_id = (file_stat.st_size, file_stat.st_mtime)
+
+                    if file_id in processed_files:
                         continue
+
                     
                     try:
                         if not pcap_file.exists():
-                            processed_files[pcap_file.name] = current_time
+                            processed_files[file_id] = current_time
                             continue
                         
                         file_stat = pcap_file.stat()
@@ -74,7 +85,7 @@ def pcap_processing_worker():
                             new_files.append((pcap_file, file_stat.st_size))
                     except Exception as e:
                         logger.warning(f"Cannot stat {pcap_file.name}: {e}")
-                        processed_files[pcap_file.name] = current_time
+                        processed_files[file_id] = current_time
                         continue
                 
                 new_files.sort(key=lambda x: x[1])
@@ -87,7 +98,7 @@ def pcap_processing_worker():
                 try:
                     if not pcap_file.exists():
                         with file_lock:
-                            processed_files[pcap_file.name] = current_time
+                            processed_files[file_id] = current_time
                         continue
                     
                     logger.info(f"Processing: {pcap_file.name} ({file_size} bytes)")
@@ -96,7 +107,7 @@ def pcap_processing_worker():
                     
                     with file_lock:
                         if not pcap_file.exists():
-                            processed_files[pcap_file.name] = current_time
+                            processed_files[file_id] = current_time
                             continue
                         
                         if result.get("status") == "success":
@@ -122,12 +133,12 @@ def pcap_processing_worker():
                             except Exception as e:
                                 logger.error(f"Error move failed: {e}")
                         
-                        processed_files[pcap_file.name] = current_time
+                        processed_files[file_id] = current_time
                     
                 except Exception as e:
                     logger.error(f"Processing error for {pcap_file.name}: {e}")
                     with file_lock:
-                        processed_files[pcap_file.name] = current_time
+                        processed_files[file_id] = current_time
             
             with file_lock:
                 if len(processed_files) > CLEANUP_THRESHOLD:
@@ -140,9 +151,65 @@ def pcap_processing_worker():
             logger.error(f"Worker crashed: {e}", exc_info=True)
             time.sleep(5)
 
+def start_worker():
+    global worker_thread, worker_restart_count, last_worker_restart
 
-worker_thread = threading.Thread(target=pcap_processing_worker, daemon=True)
-worker_thread.start()
+    with worker_lock:
+        if worker_thread and worker_thread.is_alive():
+            return
+
+        worker_thread = threading.Thread(
+            target=pcap_processing_worker,
+            daemon=True,
+            name="pcap-worker"
+        )
+        worker_thread.start()
+
+        worker_restart_count += 1
+        last_worker_restart = time.time()
+
+        logger.warning(
+            f"[SUPERVISOR] Worker started (restart #{worker_restart_count})"
+        )
+
+def worker_supervisor():
+    """
+    Ensures the PCAP worker is always running.
+    """
+    backoff = 2  # seconds
+    max_backoff = 60
+
+    while True:
+        try:
+            with worker_lock:
+                alive = worker_thread and worker_thread.is_alive()
+
+            if not alive:
+                logger.error("[SUPERVISOR] Worker not alive, restarting")
+                start_worker()
+                time.sleep(backoff)
+                backoff = min(backoff * 2, max_backoff)
+            else:
+                backoff = 2  # reset on healthy state
+
+            time.sleep(3)
+
+        except Exception as e:
+            logger.error(f"[SUPERVISOR] Crash: {e}", exc_info=True)
+            time.sleep(5)
+
+
+# worker_thread = threading.Thread(target=pcap_processing_worker, daemon=True)
+# worker_thread.start()
+start_worker()
+
+supervisor_thread = threading.Thread(
+    target=worker_supervisor,
+    daemon=True,
+    name="worker-supervisor"
+)
+supervisor_thread.start()
+
 
 
 def generate_filename(original_filename):
@@ -220,7 +287,8 @@ def traffic():
 def stats():
     """Get system statistics"""
     try:
-        pipeline_stats = pipeline.get_statistics()
+        with pipeline_lock:
+            pipeline_stats = pipeline.get_statistics()
         
         with file_lock:
             uploads_pending = len(list(config.UPLOAD_DIR.glob("*.pcap*")))
@@ -247,9 +315,13 @@ def stats():
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Health check"""
-    status = "healthy" if worker_thread.is_alive() else "worker_dead"
-    return jsonify({"status": status, "worker_thread": worker_thread.is_alive()}), 200
+    return jsonify({
+        "status": "healthy" if worker_thread and worker_thread.is_alive() else "worker_dead",
+        "worker_alive": worker_thread.is_alive() if worker_thread else False,
+        "restart_count": worker_restart_count,
+        "last_restart": last_worker_restart
+    }), 200
+
 
 
 # ============= NEW FRONTEND API ROUTES =============
@@ -258,12 +330,14 @@ def health():
 def get_devices():
     """Get all active device allocations"""
     try:
-        stats = pipeline.get_statistics()
-        devices = stats.get("allocations", [])
-        
+        with pipeline_lock:
+            stats = pipeline.get_statistics()
+            devices = stats.get("allocations", [])
+            history_snapshot = list(pipeline.history)  # Capture history snapshot
+
         # Enrich with history if available
-        if pipeline.history:
-            last_prediction = pipeline.history[-1].get("predictions", [])
+        if history_snapshot:
+            last_prediction = history_snapshot[-1].get("predictions", [])
             pred_map = {p['mac_address']: p for p in last_prediction}
             
             for device in devices:
@@ -284,9 +358,12 @@ def get_anomalies():
     """Get recent anomaly alerts"""
     try:
         anomalies = []
-        
+
+        with pipeline_lock:
+            history_snapshot = list(pipeline.history[-10:])  # Capture history snapshot
+
         # Extract anomalies from recent history
-        for entry in pipeline.history[-10:]:
+        for entry in history_snapshot:
             timestamp = entry['timestamp']
             for pred in entry['predictions']:
                 if pred.get('is_anomaly', False):
@@ -312,7 +389,8 @@ def get_history():
     """Get prediction history"""
     try:
         limit = int(request.args.get('limit', 10))
-        history = pipeline.history[-limit:]
+        with pipeline_lock:
+            history = pipeline.history[-limit:]
         return jsonify({"history": history}), 200
     except Exception as e:
         logger.error(f"Get history error: {e}")
@@ -329,7 +407,8 @@ def set_policy_mode():
         if mode not in ['auto', 'equal', 'manual']:
             return jsonify({"error": "Invalid mode"}), 400
         
-        pipeline.set_mode(mode)
+        with pipeline_lock:
+            pipeline.set_mode(mode)
         
         return jsonify({"status": "success", "mode": mode}), 200
     except Exception as e:
@@ -350,7 +429,8 @@ def set_device_override():
         if not mac or not bandwidth_kbps:
             return jsonify({"error": "Missing mac_address or bandwidth_kbps"}), 400
         
-        pipeline.set_device_override(mac, bandwidth_kbps, priority, duration_sec)
+        with pipeline_lock:
+            pipeline.set_device_override(mac, bandwidth_kbps, priority, duration_sec)
         
         return jsonify({"status": "success", "mac": mac}), 200
     except Exception as e:
@@ -362,7 +442,8 @@ def set_device_override():
 def clear_device_override(mac_address):
     """Clear manual override"""
     try:
-        pipeline.clear_device_override(mac_address)
+        with pipeline_lock:
+            pipeline.clear_device_override(mac_address)
         return jsonify({"status": "success", "mac": mac_address}), 200
     except Exception as e:
         logger.error(f"Clear override error: {e}")
@@ -388,12 +469,13 @@ def get_tc_status():
 def reset_system():
     """Reset all TC rules and history"""
     try:
-        pipeline.decision_engine.tc_controller.cleanup()
-        pipeline.history.clear()
-        pipeline.smoother.history.clear()
-        pipeline.smoother.anomaly_counts.clear()
-        pipeline.policy.overrides.clear()
+        with pipeline_lock:
+            pipeline.history.clear()
+            pipeline.smoother.history.clear()
+            pipeline.smoother.anomaly_counts.clear()
+            pipeline.policy.overrides.clear()
         
+        pipeline.decision_engine.tc_controller.cleanup()
         # Reinitialize TC
         pipeline.decision_engine.tc_controller.initialize_qdisc()
         
