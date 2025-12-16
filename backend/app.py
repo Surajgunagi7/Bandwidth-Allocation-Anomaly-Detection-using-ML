@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 pipeline = PipelineController(
     models_dir=str(config.MODELS_DIR),
     interface=config.AP_INTERFACE,
-    update_interval=10
+    update_interval=config.TC_UPDATE_INTERVAL
 )
 
 # Thread lock for file operations
