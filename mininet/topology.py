@@ -111,10 +111,9 @@ def topology(start_collector=False,traffic=False):
             info(f"Collector not found: {collector_path}\n")
 
     if traffic:
-        start_test_traffic(net, duration=180)
-    
-    info("*** Run on host machine:\n")
-    info("    sudo tc -s class show dev ap1-wlan1\n")
+        info("*** Waiting 5s for backend + collector readiness\n")
+        time.sleep(5)
+        start_test_traffic(net, duration=80)
 
     info("*** Running CLI\n   ")
     CLI(net)
@@ -126,9 +125,7 @@ def topology(start_collector=False,traffic=False):
     info("*** Stopping network\n")
     net.stop()
 
-def start_test_traffic(net, duration=180):
-    info("*** Starting automated test traffic\n")
-
+def start_test_traffic(net, duration=70):
     sta1 = net.get('sta1')
     sta2 = net.get('sta2')
     sta3 = net.get('sta3')
@@ -139,19 +136,19 @@ def start_test_traffic(net, duration=180):
     h1.cmd("iperf -s -D")
     h1.cmd("python3 -m http.server 80 &")
 
-    # High BW TCP
-    sta1.cmd(f"iperf -c {h1.IP()} -t {duration} -i 1 &")
+    # Bulk TCP (dominant)
+    sta1.cmd(f"iperf -c {h1.IP()} -t {duration} -w 2M &")
 
-    # Medium HTTP
+    # HTTP
     sta2.cmd(
         f"while true; do "
         f"wget -O /dev/null http://{h1.IP()}:80 || true; "
-        f"sleep 2; "
+        f"sleep 1; "
         f"done &"
     )
 
-    # Low UDP
-    sta3.cmd(f"iperf -u -c {h1.IP()} -b 512K -t {duration} &")
+    # High UDP
+    sta3.cmd(f"iperf -u -c {h1.IP()} -b 20M -t {duration} &")
 
 
 if __name__ == '__main__':
