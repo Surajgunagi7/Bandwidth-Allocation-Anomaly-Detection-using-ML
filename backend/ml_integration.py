@@ -82,6 +82,14 @@ class MLModelManager:
     
     def predict_bandwidth(self, features_df: pd.DataFrame) -> pd.DataFrame:
         """Predict bandwidth with fallback"""
+
+        if self.bandwidth_model is None or features_df.empty:
+            result = features_df[['mac_address']].copy() if not features_df.empty else pd.DataFrame(columns=['mac_address'])
+            result['predicted_bandwidth_kbps'] = Config.MIN_BANDWIDTH_KBPS * 2  # Default 1 Mbps
+            result['confidence'] = 1.0
+            logger.info("No bandwidth limit mode enabled - assigning max bandwidth")
+            return result
+        
         if self.bandwidth_model is None or features_df.empty:
             result = features_df[['mac_address']].copy() if not features_df.empty else pd.DataFrame(columns=['mac_address'])
             result['predicted_bandwidth_kbps'] = Config.MIN_BANDWIDTH_KBPS * 2  # Default 1 Mbps

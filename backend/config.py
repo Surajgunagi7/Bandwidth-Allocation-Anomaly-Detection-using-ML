@@ -133,7 +133,7 @@ class Config:
     PREDICTION_THRESHOLD = float(os.getenv("PREDICTION_THRESHOLD", "0.7"))
     
     # Known AP MAC addresses (will be auto-detected)
-    KNOWN_AP_MACS = set()
+    KNOWN_AP_MACS = {"02:00:00:00:03:00"}
     
     # Traffic Control
     TC_UPDATE_INTERVAL = int(os.getenv("TC_UPDATE_INTERVAL", "10"))
@@ -161,6 +161,7 @@ class Config:
     
     # Anomaly Detection
     ANOMALY_BANDWIDTH_CAP = int(os.getenv("ANOMALY_BANDWIDTH_CAP", "1000"))
+    NO_BANDWIDTH_LIMIT_MODE = os.getenv("NO_BANDWIDTH_LIMIT_MODE", "false").lower() == "true"
     
     # Logging
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

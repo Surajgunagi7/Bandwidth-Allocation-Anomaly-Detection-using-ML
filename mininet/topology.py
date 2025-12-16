@@ -126,11 +126,7 @@ def topology(start_collector=False,traffic=False):
     info("*** Stopping network\n")
     net.stop()
 
-def start_test_traffic(net, duration=120):
-    """
-    Auto-generate background traffic for testing bandwidth allocation.
-    SAFE: does not modify topology or existing behavior.
-    """
+def start_test_traffic(net, duration=180):
     info("*** Starting automated test traffic\n")
 
     sta1 = net.get('sta1')
@@ -138,17 +134,15 @@ def start_test_traffic(net, duration=120):
     sta3 = net.get('sta3')
     h1 = net.get('h1')
 
-    # Ensure iperf exists
     h1.cmd("pkill -f iperf || true")
     h1.cmd("iperf -s -u -D")
     h1.cmd("iperf -s -D")
+    h1.cmd("python3 -m http.server 80 &")
 
-    # 1️⃣ High bandwidth bulk traffic (TCP)
-    sta1.cmd(
-        f"iperf -c {h1.IP()} -t {duration} -i 1 &"
-    )
+    # High BW TCP
+    sta1.cmd(f"iperf -c {h1.IP()} -t {duration} -i 1 &")
 
-    # 2️⃣ Medium HTTP-like traffic (repeated downloads)
+    # Medium HTTP
     sta2.cmd(
         f"while true; do "
         f"wget -O /dev/null http://{h1.IP()}:80 || true; "
@@ -156,12 +150,8 @@ def start_test_traffic(net, duration=120):
         f"done &"
     )
 
-    # 3️⃣ Low steady traffic (UDP)
-    sta3.cmd(
-        f"iperf -u -c {h1.IP()} -b 512K -t {duration} &"
-    )
-
-    info("*** Test traffic started\n")
+    # Low UDP
+    sta3.cmd(f"iperf -u -c {h1.IP()} -b 512K -t {duration} &")
 
 
 if __name__ == '__main__':
