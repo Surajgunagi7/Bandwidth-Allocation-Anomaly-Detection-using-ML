@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Flask Backend with Frontend API Endpoints
-NEW: Adds endpoints for dashboard control and monitoring
+Flask Backend with Improved Logging and Dynamic Bandwidth API
 """
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -14,39 +13,34 @@ import threading
 import time
 import shutil
 
-from config import config
+from config import Config
 from ml_integration import PipelineController
 
 app = Flask(__name__)
 CORS(app)
-app.secret_key = config.SECRET_KEY
+app.secret_key = Config.SECRET_KEY
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Logging is now configured in Config
 logger = logging.getLogger(__name__)
 
 # Initialize pipeline
 pipeline = PipelineController(
-    models_dir=str(config.MODELS_DIR),
-    interface=config.AP_INTERFACE,
-    update_interval=config.TC_UPDATE_INTERVAL
+    models_dir=str(Config.MODELS_DIR),
+    interface=Config.AP_INTERFACE,
+    update_interval=Config.TC_UPDATE_INTERVAL
 )
 
 worker_thread = None
 worker_lock = threading.Lock()
-
 worker_restart_count = 0
 last_worker_restart = None
-
 file_lock = threading.Lock()
-
 pipeline_lock = threading.RLock()
+
 
 def pcap_processing_worker():
     """Background worker for PCAP processing"""
-    logger.info("Background worker started")
+    logger.info("🔄 Background worker started")
     processed_files = {}
     FILE_STABLE_TIME = 2.0
     MAX_FILES_PER_BATCH = 5
@@ -56,102 +50,106 @@ def pcap_processing_worker():
         try:
             with file_lock:
                 try:
-                    pcap_files = list(config.UPLOAD_DIR.glob("*.pcap*"))
+                    pcap_files = list(Config.UPLOAD_DIR.glob("*.pcap*"))
                 except Exception as e:
                     logger.error(f"Error listing uploads: {e}")
-                    time.sleep(config.PROCESSING_INTERVAL)
+                    time.sleep(Config.PROCESSING_INTERVAL)
                     continue
                 
                 new_files = []
                 current_time = time.time()
                 
                 for pcap_file in pcap_files:
-                    file_stat = pcap_file.stat()
-                    file_id = (file_stat.st_size, file_stat.st_mtime)
-
-                    if file_id in processed_files:
-                        continue
-
-                    
                     try:
                         if not pcap_file.exists():
-                            processed_files[file_id] = current_time
                             continue
                         
                         file_stat = pcap_file.stat()
+                        file_id = (file_stat.st_size, file_stat.st_mtime)
+                        
+                        if file_id in processed_files:
+                            continue
+                        
                         file_age = current_time - file_stat.st_mtime
                         
                         if file_age >= FILE_STABLE_TIME and file_stat.st_size > 0:
                             new_files.append((pcap_file, file_stat.st_size))
                     except Exception as e:
-                        logger.warning(f"Cannot stat {pcap_file.name}: {e}")
-                        processed_files[file_id] = current_time
+                        logger.debug(f"Cannot stat {pcap_file.name}: {e}")
                         continue
                 
                 new_files.sort(key=lambda x: x[1])
                 files_to_process = new_files[:MAX_FILES_PER_BATCH]
                 
                 if files_to_process:
-                    logger.info(f"Processing batch of {len(files_to_process)} file(s)")
+                    logger.info(f"📦 Processing batch: {len(files_to_process)} file(s)")
             
             for pcap_file, file_size in files_to_process:
                 try:
                     if not pcap_file.exists():
-                        with file_lock:
-                            processed_files[file_id] = current_time
                         continue
                     
                     logger.info(f"Processing: {pcap_file.name} ({file_size} bytes)")
-                    pcap_path_str = str(pcap_file.absolute())
-                    result = pipeline.process_pcap(pcap_path_str)
+                    
+                    with pipeline_lock:
+                        result = pipeline.process_pcap(str(pcap_file.absolute()))
                     
                     with file_lock:
                         if not pcap_file.exists():
-                            processed_files[file_id] = current_time
                             continue
                         
+                        file_stat = pcap_file.stat()
+                        file_id = (file_stat.st_size, file_stat.st_mtime)
+                        
                         if result.get("status") == "success":
-                            dest = config.PROCESSED_DIR / pcap_file.name
+                            dest = Config.PROCESSED_DIR / pcap_file.name
                             counter = 1
                             original_dest = dest
                             while dest.exists():
-                                dest = config.PROCESSED_DIR / f"{original_dest.stem}_{counter}{original_dest.suffix}"
+                                dest = Config.PROCESSED_DIR / f"{original_dest.stem}_{counter}{original_dest.suffix}"
                                 counter += 1
                             
                             try:
                                 shutil.move(str(pcap_file), str(dest))
-                                logger.info(f"✓ Moved: {pcap_file.name}")
+                                logger.info(f"✅ Moved: {pcap_file.name}")
                             except Exception as move_error:
                                 logger.error(f"Move failed: {move_error}")
                         else:
-                            error_dir = config.UPLOAD_DIR.parent / "errors"
+                            error_dir = Config.UPLOAD_DIR.parent / "errors"
                             error_dir.mkdir(exist_ok=True)
                             error_dest = error_dir / f"error_{pcap_file.name}"
                             try:
                                 if pcap_file.exists():
                                     shutil.move(str(pcap_file), str(error_dest))
                             except Exception as e:
-                                logger.error(f"Error move failed: {e}")
+                                logger.debug(f"Error move failed: {e}")
                         
                         processed_files[file_id] = current_time
                     
                 except Exception as e:
                     logger.error(f"Processing error for {pcap_file.name}: {e}")
                     with file_lock:
-                        processed_files[file_id] = current_time
+                        try:
+                            file_stat = pcap_file.stat()
+                            file_id = (file_stat.st_size, file_stat.st_mtime)
+                            processed_files[file_id] = current_time
+                        except:
+                            pass
             
             with file_lock:
                 if len(processed_files) > CLEANUP_THRESHOLD:
                     sorted_items = sorted(processed_files.items(), key=lambda x: x[1], reverse=True)
                     processed_files = dict(sorted_items[:CLEANUP_THRESHOLD // 2])
             
-            time.sleep(config.PROCESSING_INTERVAL)
+            time.sleep(Config.PROCESSING_INTERVAL)
 
         except Exception as e:
             logger.error(f"Worker crashed: {e}", exc_info=True)
             time.sleep(5)
 
+
 def start_worker():
+    """Start background worker"""
     global worker_thread, worker_restart_count, last_worker_restart
 
     with worker_lock:
@@ -168,15 +166,12 @@ def start_worker():
         worker_restart_count += 1
         last_worker_restart = time.time()
 
-        logger.warning(
-            f"[SUPERVISOR] Worker started (restart #{worker_restart_count})"
-        )
+        logger.info(f"Worker started (restart #{worker_restart_count})")
+
 
 def worker_supervisor():
-    """
-    Ensures the PCAP worker is always running.
-    """
-    backoff = 2  # seconds
+    """Supervisor to ensure worker is always running"""
+    backoff = 2
     max_backoff = 60
 
     while True:
@@ -185,24 +180,22 @@ def worker_supervisor():
                 alive = worker_thread and worker_thread.is_alive()
 
             if not alive:
-                logger.error("[SUPERVISOR] Worker not alive, restarting")
+                logger.error("Worker not alive, restarting")
                 start_worker()
                 time.sleep(backoff)
                 backoff = min(backoff * 2, max_backoff)
             else:
-                backoff = 2  # reset on healthy state
+                backoff = 2
 
             time.sleep(3)
 
         except Exception as e:
-            logger.error(f"[SUPERVISOR] Crash: {e}", exc_info=True)
+            logger.error(f"Supervisor crash: {e}", exc_info=True)
             time.sleep(5)
 
 
-# worker_thread = threading.Thread(target=pcap_processing_worker, daemon=True)
-# worker_thread.start()
+# Start worker and supervisor
 start_worker()
-
 supervisor_thread = threading.Thread(
     target=worker_supervisor,
     daemon=True,
@@ -211,12 +204,11 @@ supervisor_thread = threading.Thread(
 supervisor_thread.start()
 
 
-
 def generate_filename(original_filename):
     """Generate timestamped filename"""
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
     secure_name = secure_filename(original_filename or "capture.pcap")
-    if not any(secure_name.lower().endswith(ext) for ext in config.ALLOWED_EXTENSIONS):
+    if not any(secure_name.lower().endswith(ext) for ext in Config.ALLOWED_EXTENSIONS):
         secure_name += ".pcap"
     return f"{timestamp}_{secure_name}"
 
@@ -239,11 +231,11 @@ def traffic():
             if not file or file.filename == "":
                 return jsonify({"error": "No file selected"}), 400
             
-            if request.content_length and request.content_length > config.MAX_FILE_SIZE:
+            if request.content_length and request.content_length > Config.MAX_FILE_SIZE:
                 return jsonify({"error": "File too large"}), 413
             
             filename = generate_filename(file.filename)
-            saved_path = config.UPLOAD_DIR / filename
+            saved_path = Config.UPLOAD_DIR / filename
             
             with file_lock:
                 file.save(str(saved_path))
@@ -252,12 +244,12 @@ def traffic():
         
         elif request.data:
             data = request.get_data()
-            if len(data) > config.MAX_FILE_SIZE:
+            if len(data) > Config.MAX_FILE_SIZE:
                 return jsonify({"error": "File too large"}), 413
             
             filename = request.headers.get("X-Filename", "capture.pcap")
             filename = generate_filename(filename)
-            saved_path = config.UPLOAD_DIR / filename
+            saved_path = Config.UPLOAD_DIR / filename
             
             with file_lock:
                 with open(saved_path, "wb") as f:
@@ -291,20 +283,20 @@ def stats():
             pipeline_stats = pipeline.get_statistics()
         
         with file_lock:
-            uploads_pending = len(list(config.UPLOAD_DIR.glob("*.pcap*")))
-            processed_total = len(list(config.PROCESSED_DIR.glob("*.pcap*")))
-            error_dir = config.UPLOAD_DIR.parent / "errors"
+            uploads_pending = len(list(Config.UPLOAD_DIR.glob("*.pcap*")))
+            processed_total = len(list(Config.PROCESSED_DIR.glob("*.pcap*")))
+            error_dir = Config.UPLOAD_DIR.parent / "errors"
             errors_total = len(list(error_dir.glob("*.pcap*"))) if error_dir.exists() else 0
         
         return jsonify({
-            "total_bandwidth_mbps": config.TOTAL_BANDWIDTH_MBPS,
-            "ap_interface": config.AP_INTERFACE,
+            "total_bandwidth_mbps": Config.get_total_bandwidth(),
+            "ap_interface": Config.AP_INTERFACE,
             "active_devices": pipeline_stats.get("active_devices", 0),
             "uploads_pending": uploads_pending,
             "processed_total": processed_total,
             "errors_total": errors_total,
             "uptime": time.time() - start_time,
-            "worker_alive": worker_thread.is_alive(),
+            "worker_alive": worker_thread.is_alive() if worker_thread else False,
             "policy_mode": pipeline_stats.get("policy_mode", "auto"),
             "active_overrides": pipeline_stats.get("active_overrides", 0)
         })
@@ -315,6 +307,7 @@ def stats():
 
 @app.route("/health", methods=["GET"])
 def health():
+    """Health check"""
     return jsonify({
         "status": "healthy" if worker_thread and worker_thread.is_alive() else "worker_dead",
         "worker_alive": worker_thread.is_alive() if worker_thread else False,
@@ -323,8 +316,43 @@ def health():
     }), 200
 
 
+# ============= NEW API ROUTES =============
 
-# ============= NEW FRONTEND API ROUTES =============
+@app.route("/api/bandwidth/config", methods=["GET", "POST"])
+def bandwidth_config():
+    """Get or set bandwidth configuration"""
+    if request.method == "GET":
+        return jsonify({
+            "total_bandwidth_mbps": Config.get_total_bandwidth(),
+            "interface": Config.AP_INTERFACE,
+            "source": "manual" if Config._total_bandwidth_mbps else "detected"
+        }), 200
+    
+    elif request.method == "POST":
+        try:
+            data = request.get_json()
+            bandwidth_mbps = data.get('bandwidth_mbps')
+            
+            if not bandwidth_mbps or bandwidth_mbps <= 0:
+                return jsonify({"error": "Invalid bandwidth value"}), 400
+            
+            Config.set_total_bandwidth(int(bandwidth_mbps))
+            
+            # Reinitialize TC with new bandwidth
+            with pipeline_lock:
+                pipeline.decision_engine.tc_controller.initialize_qdisc(int(bandwidth_mbps))
+            
+            logger.info(f"✅ Bandwidth updated to {bandwidth_mbps} Mbps")
+            
+            return jsonify({
+                "status": "success",
+                "bandwidth_mbps": int(bandwidth_mbps)
+            }), 200
+            
+        except Exception as e:
+            logger.error(f"Bandwidth config error: {e}")
+            return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/devices", methods=["GET"])
 def get_devices():
@@ -333,12 +361,17 @@ def get_devices():
         with pipeline_lock:
             stats = pipeline.get_statistics()
             devices = stats.get("allocations", [])
-            history_snapshot = list(pipeline.history)  # Capture history snapshot
+            history_snapshot = list(pipeline.history)
 
-        # Enrich with history if available
         if history_snapshot:
-            last_prediction = history_snapshot[-1].get("predictions", [])
-            pred_map = {p['mac_address']: p for p in last_prediction}
+            last_entry = history_snapshot[-1]
+            pred_map = {}
+            
+            # Try to get from final predictions
+            if 'final' in last_entry:
+                pred_map = {p['mac_address']: p for p in last_entry['final']}
+            elif 'predictions' in last_entry:
+                pred_map = {p['mac_address']: p for p in last_entry['predictions']}
             
             for device in devices:
                 mac = device['mac']
@@ -360,12 +393,13 @@ def get_anomalies():
         anomalies = []
 
         with pipeline_lock:
-            history_snapshot = list(pipeline.history[-10:])  # Capture history snapshot
+            history_snapshot = list(pipeline.history[-10:])
 
-        # Extract anomalies from recent history
         for entry in history_snapshot:
             timestamp = entry['timestamp']
-            for pred in entry['predictions']:
+            predictions = entry.get('final', entry.get('predictions', []))
+            
+            for pred in predictions:
                 if pred.get('is_anomaly', False):
                     anomalies.append({
                         'mac_address': pred['mac_address'],
@@ -375,10 +409,9 @@ def get_anomalies():
                         'bandwidth_kbps': pred.get('predicted_bandwidth_kbps', 0)
                     })
         
-        # Sort by timestamp (newest first)
         anomalies.sort(key=lambda x: x['timestamp'], reverse=True)
         
-        return jsonify({"anomalies": anomalies[:20]}), 200  # Last 20
+        return jsonify({"anomalies": anomalies[:20]}), 200
     except Exception as e:
         logger.error(f"Get anomalies error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -454,7 +487,8 @@ def clear_device_override(mac_address):
 def get_tc_status():
     """Get Traffic Control status"""
     try:
-        tc_stats = pipeline.decision_engine.tc_controller.get_stats()
+        with pipeline_lock:
+            tc_stats = pipeline.decision_engine.tc_controller.get_stats()
         return jsonify({
             "tc_initialized": pipeline.decision_engine.tc_controller.initialized,
             "interface": pipeline.decision_engine.tc_controller.interface,
@@ -474,10 +508,10 @@ def reset_system():
             pipeline.smoother.history.clear()
             pipeline.smoother.anomaly_counts.clear()
             pipeline.policy.overrides.clear()
+            pipeline.decision_engine.tc_controller.cleanup()
+            pipeline.decision_engine.tc_controller.initialize_qdisc()
         
-        pipeline.decision_engine.tc_controller.cleanup()
-        # Reinitialize TC
-        pipeline.decision_engine.tc_controller.initialize_qdisc()
+        logger.info("System reset complete")
         
         return jsonify({"status": "success", "message": "System reset"}), 200
     except Exception as e:
@@ -488,10 +522,13 @@ def reset_system():
 start_time = time.time()
 
 if __name__ == "__main__":
-    logger.info("=== ML WiFi Controller v2.0 STARTED ===")
-    logger.info(f"Total bandwidth: {config.TOTAL_BANDWIDTH_MBPS} Mbps")
-    logger.info(f"AP interface: {config.AP_INTERFACE}")
-    logger.info(f"Processing interval: {config.PROCESSING_INTERVAL}s")
-    logger.info(f"Frontend API enabled: /api/*")
+    logger.info("=" * 60)
+    logger.info("ML WiFi Controller v2.0 STARTED")
+    logger.info("=" * 60)
+    logger.info(f"Total bandwidth: {Config.get_total_bandwidth()} Mbps")
+    logger.info(f"AP interface: {Config.AP_INTERFACE}")
+    logger.info(f"Processing interval: {Config.PROCESSING_INTERVAL}s")
+    logger.info(f"Logs directory: {Config.LOGS_DIR}")
+    logger.info("=" * 60)
     
-    app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG, threaded=True)
+    app.run(host=Config.HOST, port=Config.PORT, debug=Config.DEBUG, threaded=True)
