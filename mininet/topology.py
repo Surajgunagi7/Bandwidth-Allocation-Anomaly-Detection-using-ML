@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 import time
 
-def topology(start_collector=False):
+def topology(start_collector=False,traffic=False):
     """Create a custom topology with AP, stations, wired host, and controller"""
     
     info("*** Creating network\n")
@@ -110,8 +110,11 @@ def topology(start_collector=False):
         else:
             info(f"Collector not found: {collector_path}\n")
 
-    # info("*** Testing connectivity\n")
-    # net.pingAll()
+    if traffic:
+        start_test_traffic(net, duration=180)
+    
+    info("*** Run on host machine:\n")
+    info("    sudo tc -s class show dev ap1-wlan1\n")
 
     info("*** Running CLI\n   ")
     CLI(net)
@@ -123,6 +126,44 @@ def topology(start_collector=False):
     info("*** Stopping network\n")
     net.stop()
 
+def start_test_traffic(net, duration=120):
+    """
+    Auto-generate background traffic for testing bandwidth allocation.
+    SAFE: does not modify topology or existing behavior.
+    """
+    info("*** Starting automated test traffic\n")
+
+    sta1 = net.get('sta1')
+    sta2 = net.get('sta2')
+    sta3 = net.get('sta3')
+    h1 = net.get('h1')
+
+    # Ensure iperf exists
+    h1.cmd("pkill -f iperf || true")
+    h1.cmd("iperf -s -u -D")
+    h1.cmd("iperf -s -D")
+
+    # 1️⃣ High bandwidth bulk traffic (TCP)
+    sta1.cmd(
+        f"iperf -c {h1.IP()} -t {duration} -i 1 &"
+    )
+
+    # 2️⃣ Medium HTTP-like traffic (repeated downloads)
+    sta2.cmd(
+        f"while true; do "
+        f"wget -O /dev/null http://{h1.IP()}:80 || true; "
+        f"sleep 2; "
+        f"done &"
+    )
+
+    # 3️⃣ Low steady traffic (UDP)
+    sta3.cmd(
+        f"iperf -u -c {h1.IP()} -b 512K -t {duration} &"
+    )
+
+    info("*** Test traffic started\n")
+
+
 if __name__ == '__main__':
     setLogLevel('info')
-    topology(start_collector=True)
+    topology(start_collector=True,traffic=True)

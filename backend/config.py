@@ -88,6 +88,9 @@ class Config:
     # Logging
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+
+    # Anomaly Mode
+    NO_ANOMALY_MODE = os.getenv("NO_ANOMALY_MODE", "false").lower() == "true"
     
     @classmethod
     def validate(cls):
@@ -156,33 +159,3 @@ Config.create_directories()
 # Export config instance
 config = Config()
 
-
-# ============= .env FILE =============
-# Create a file named .env in the backend/ directory with these contents:
-"""
-# Flask Configuration
-FLASK_ENV=development
-FLASK_HOST=0.0.0.0
-FLASK_PORT=5000
-SECRET_KEY=your-secret-key-here-change-in-production
-
-# Network Configuration
-AP_INTERFACE=ap1-wlan1
-TOTAL_BANDWIDTH_MBPS=100
-
-# Traffic Control
-TC_UPDATE_INTERVAL=10
-TC_CHANGE_THRESHOLD=0.15
-ANOMALY_BANDWIDTH_CAP=1000
-
-# ML Configuration
-ML_BATCH_SIZE=10
-PREDICTION_THRESHOLD=0.7
-
-# Processing
-PROCESSING_INTERVAL=5
-CLEANUP_AGE=3600
-
-# Logging
-LOG_LEVEL=INFO
-"""

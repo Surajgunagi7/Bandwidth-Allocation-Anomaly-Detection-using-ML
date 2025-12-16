@@ -128,6 +128,15 @@ class MLModelManager:
     
     def detect_anomalies(self, features_df: pd.DataFrame) -> pd.DataFrame:
         """Detect anomalies with confidence scores"""
+
+        if getattr(Config, "NO_ANOMALY_MODE", False):
+            result = features_df[['mac_address']].copy()
+            result['is_anomaly'] = False
+            result['anomaly_score'] = 0.0
+            result['confidence'] = 1.0
+            logger.warning("⚠ NO_ANOMALY_MODE enabled — skipping anomaly detection")
+            return result
+
         if self.anomaly_model is None:
             result = features_df[['mac_address']].copy()
             result['is_anomaly'] = False
