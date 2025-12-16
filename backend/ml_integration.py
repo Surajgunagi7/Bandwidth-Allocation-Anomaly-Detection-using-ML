@@ -52,6 +52,8 @@ class MLModelManager:
         self.anomaly_model = None
         self.bandwidth_scaler = None
         self.anomaly_scaler = None
+        self.expected_bw_features = set(self.BANDWIDTH_FEATURES)
+        self.expected_an_features = set(self.ANOMALY_FEATURES)
         self._load_models()
     
     def _load_models(self):
@@ -87,6 +89,10 @@ class MLModelManager:
             result['confidence'] = 0.0
             return result
         
+        missing = self.expected_bw_features - set(features_df.columns)
+        if missing:
+            raise RuntimeError(f"Missing bandwidth features: {missing}")
+        
         try:
             X = features_df[self.BANDWIDTH_FEATURES].copy()
             numeric_features = [f for f in self.BANDWIDTH_FEATURES if f != 'protocol_type']
@@ -105,17 +111,17 @@ class MLModelManager:
                 confidence = np.max(probas, axis=1)
             else:
                 # For regressors, use inverse of prediction std or default
-                confidence = np.ones(len(predictions)) * 0.8
+                confidence = np.ones(len(predictions), dtype=float)
             
             result = features_df[['mac_address']].copy()
             result['predicted_bandwidth_kbps'] = np.clip(predictions, 100, 100000).round().astype(int)
             result['confidence'] = confidence
             
             # Filter low confidence predictions
-            low_conf_mask = confidence < self.prediction_threshold
-            if low_conf_mask.any():
-                logger.warning(f"⚠ {low_conf_mask.sum()} predictions below confidence threshold")
-                result.loc[low_conf_mask, 'predicted_bandwidth_kbps'] = 1000  # Fallback
+            # low_conf_mask = confidence < self.prediction_threshold
+            # if low_conf_mask.any():
+            #     logger.warning(f"⚠ {low_conf_mask.sum()} predictions below confidence threshold")
+            #     result.loc[low_conf_mask, 'predicted_bandwidth_kbps'] = 1000  # Fallback
             
             return result
             
@@ -144,6 +150,10 @@ class MLModelManager:
             result['confidence'] = 0.0
             return result
         
+        missing = self.expected_an_features - set(features_df.columns)
+        if missing:
+            raise RuntimeError(f"Missing anomaly features: {missing}")
+
         try:
             X = features_df[self.ANOMALY_FEATURES].copy()
             numeric_features = [f for f in self.ANOMALY_FEATURES if f != 'protocol_type']
@@ -157,22 +167,29 @@ class MLModelManager:
             predictions = self.anomaly_model.predict(X_scaled)
             anomaly_scores = self.anomaly_model.score_samples(X_scaled)
             
-            # Normalize scores
-            normalized_scores = 1 / (1 + np.exp(anomaly_scores))
+            # # Normalize scores
+            # normalized_scores = 1 / (1 + np.exp(anomaly_scores))
             
-            # Confidence based on score magnitude
-            confidence = np.abs(anomaly_scores) / (np.abs(anomaly_scores).max() + 1e-6)
+            # # Confidence based on score magnitude
+            # confidence = np.abs(anomaly_scores) / (np.abs(anomaly_scores).max() + 1e-6)
             
+            # result = features_df[['mac_address']].copy()
+            # result['is_anomaly'] = (predictions == -1)
+            # result['anomaly_score'] = normalized_scores
+            # result['confidence'] = confidence
+            
+
+            # # Only flag anomalies with high confidence
+            # low_conf_anomalies = (result['is_anomaly']) & (confidence < self.prediction_threshold)
+            # if low_conf_anomalies.any():
+            #     logger.warning(f"⚠ Ignoring {low_conf_anomalies.sum()} low-confidence anomalies")
+            #     result.loc[low_conf_anomalies, 'is_anomaly'] = False
+
+            # Alternative: temp sol till retrained model with probas
             result = features_df[['mac_address']].copy()
             result['is_anomaly'] = (predictions == -1)
-            result['anomaly_score'] = normalized_scores
-            result['confidence'] = confidence
-            
-            # Only flag anomalies with high confidence
-            low_conf_anomalies = (result['is_anomaly']) & (confidence < self.prediction_threshold)
-            if low_conf_anomalies.any():
-                logger.warning(f"⚠ Ignoring {low_conf_anomalies.sum()} low-confidence anomalies")
-                result.loc[low_conf_anomalies, 'is_anomaly'] = False
+            result['anomaly_score'] = -anomaly_scores  # higher = more anomalous
+            result['confidence'] = np.ones(len(predictions))
             
             return result
             
@@ -240,7 +257,8 @@ class TemporalSmoother:
         weighted_sum = 0
         
         for entry in self.history[mac]:
-            weight = entry['conf']
+            # weight = entry['conf']
+            weight = 1.0
             weighted_sum += entry['bw'] * weight
             total_weight += weight
         
@@ -255,7 +273,8 @@ class TemporalSmoother:
             self.anomaly_counts[mac] = 0
         
         # Only count high-confidence anomalies
-        if is_anomaly and confidence > 0.65:
+        # if is_anomaly and confidence > 0.65:
+        if is_anomaly:
             self.anomaly_counts[mac] += 1
         else:
             self.anomaly_counts[mac] = max(0, self.anomaly_counts[mac] - 1)
@@ -380,7 +399,7 @@ class PipelineController:
             enforcement = self._enforce_allocations(final)
             
             # Store history
-            self._update_history(final)
+            self._update_history(merged=merged, smoothed=smoothed, final=final)
             
             response = {
                 'status': 'success',
@@ -503,13 +522,19 @@ class PipelineController:
             logger.error(f"Enforcement failed: {e}")
             return {'status': 'failed', 'error': str(e)}
     
-    def _update_history(self, predictions: pd.DataFrame, max_history: int = 10):
+    def _update_history(self, predictions: pd.DataFrame, merged: pd.DataFrame, max_history: int = 10, smoothed: pd.DataFrame = None, final: pd.DataFrame = None):
         """Store history"""
+        # self.history.append({
+        #     'timestamp': datetime.now(UTC).isoformat(),
+        #     'predictions': predictions.to_dict('records')
+        # })
         self.history.append({
             'timestamp': datetime.now(UTC).isoformat(),
-            'predictions': predictions.to_dict('records')
+            'raw_ml': merged.to_dict('records'),
+            'smoothed': smoothed.to_dict('records'),
+            'final': final.to_dict('records')
         })
-        
+
         if len(self.history) > max_history:
             self.history = self.history[-max_history:]
     
