@@ -113,7 +113,7 @@ def topology(start_collector=False,traffic=False):
     if traffic:
         info("*** Waiting 5s for backend + collector readiness\n")
         time.sleep(5)
-        start_test_traffic(net, duration=80)
+        start_test_traffic(net, duration=180)
 
     info("*** Running CLI\n   ")
     CLI(net)
@@ -125,30 +125,49 @@ def topology(start_collector=False,traffic=False):
     info("*** Stopping network\n")
     net.stop()
 
-def start_test_traffic(net, duration=70):
+def start_test_traffic(net, duration=180):
+    """
+    Demo traffic for bandwidth ML testing
+    - sta1: High TCP bulk
+    - sta2: Medium HTTP bursts
+    - sta3: Low steady UDP
+    """
+
+    info("*** Starting ML demo traffic\n")
+
     sta1 = net.get('sta1')
     sta2 = net.get('sta2')
     sta3 = net.get('sta3')
     h1 = net.get('h1')
 
+    # Cleanup
     h1.cmd("pkill -f iperf || true")
-    h1.cmd("iperf -s -u -D")
+    h1.cmd("pkill -f http.server || true")
+
+    # Start servers
     h1.cmd("iperf -s -D")
+    h1.cmd("iperf -s -u -D")
     h1.cmd("python3 -m http.server 80 &")
 
-    # Bulk TCP (dominant)
-    sta1.cmd(f"iperf -c {h1.IP()} -t {duration} -w 2M &")
+    # 🔴 sta1 — High bandwidth TCP bulk
+    sta1.cmd(
+        f"iperf -c {h1.IP()} -t {duration} -i 1 &"
+    )
 
-    # HTTP
+    # 🟡 sta2 — Medium HTTP-like traffic
     sta2.cmd(
         f"while true; do "
         f"wget -O /dev/null http://{h1.IP()}:80 || true; "
-        f"sleep 1; "
+        f"sleep 1.5; "
         f"done &"
     )
 
-    # High UDP
-    sta3.cmd(f"iperf -u -c {h1.IP()} -b 20M -t {duration} &")
+    # 🟢 sta3 — Low steady UDP
+    sta3.cmd(
+        f"iperf -u -c {h1.IP()} -b 512K -t {duration} &"
+    )
+
+    info("*** Demo traffic started\n")
 
 
 if __name__ == '__main__':
