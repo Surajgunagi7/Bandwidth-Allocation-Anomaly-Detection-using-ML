@@ -34,10 +34,14 @@ class MLModelManager:
         'is_encrypted', 'time_of_day'
     ]
     
-    ANOMALY_FEATURES = BANDWIDTH_FEATURES + [
-        'connection_rate', 'failed_connection_ratio', 'port_scan_indicator',
-        'packet_size_variance', 'protocol_diversity'
+    ANOMALY_FEATURES = [
+        'avg_packet_size','total_bytes','total_packets','flow_duration',
+        'bytes_per_second','packets_per_second','avg_inter_arrival_time',
+        'std_packet_size','unique_dst_ports','tcp_flag_ratio','payload_entropy',
+        'bidirectional_ratio','is_encrypted','connection_rate','failed_connection_ratio',
+        'port_scan_indicator','packet_size_variance','protocol_diversity'
     ]
+
     
     def __init__(self, models_dir: str = "./models", 
                  prediction_threshold: float = 0.65):
@@ -145,7 +149,7 @@ class MLModelManager:
         
         if Config.NO_ANOMALY_MODE:
             result = features_df[['mac_address']].copy() if not features_df.empty else pd.DataFrame(columns=['mac_address'])
-            result['is_anomaly'] = False
+            result['is_suspicious'] = False
             result['anomaly_score'] = 0.0
             result['confidence'] = 1.0
             logger.info("Anomaly detection disabled (NO_ANOMALY_MODE)")
@@ -178,13 +182,15 @@ class MLModelManager:
             anomaly_scores = self.anomaly_model.score_samples(X_scaled)
             
             result = features_df[['mac_address']].copy()
-            result['is_anomaly'] = (predictions == -1)
-            result['anomaly_score'] = -anomaly_scores  # Higher = more anomalous
+            result['is_suspicious'] = (predictions == -1)
+            result['anomaly_score'] = -anomaly_scores
             result['confidence'] = np.ones(len(predictions))
+
             
-            anomaly_count = result['is_anomaly'].sum()
-            if anomaly_count > 0:
-                logger.warning(f"🚨 Detected {anomaly_count} anomalies")
+            suspicious_count = result['is_suspicious'].sum()
+            if suspicious_count > 0:
+                logger.info(f"⚠️ Detected {suspicious_count} suspicious flows")
+
             
             return result
             
@@ -254,22 +260,17 @@ class TemporalSmoother:
         avg = int(np.mean([h['bw'] for h in self.history[mac]]))
         return avg
     
-    def confirm_anomaly(self, mac: str, is_anomaly: bool, confidence: float) -> bool:
-        """Require sustained anomaly detection"""
+    def confirm_anomaly(self, mac: str, is_suspicious: bool) -> bool:
         if mac not in self.anomaly_counts:
             self.anomaly_counts[mac] = 0
-        
-        if is_anomaly:
+
+        if is_suspicious:
             self.anomaly_counts[mac] += 1
         else:
             self.anomaly_counts[mac] = max(0, self.anomaly_counts[mac] - 1)
-        
-        confirmed = self.anomaly_counts[mac] >= self.anomaly_consensus
-        
-        if confirmed:
-            logger.warning(f"🚨 Confirmed anomaly: {mac} ({self.anomaly_counts[mac]} detections)")
-        
-        return confirmed
+
+        return self.anomaly_counts[mac] >= self.anomaly_consensus
+
     
     def reset_device(self, mac: str):
         """Clear history"""
@@ -410,7 +411,7 @@ class PipelineController:
             merged['confidence'] = 0.0
         
         if not anomalies.empty:
-            merged = merged.merge(anomalies, on='mac_address', how='left', suffixes=('_bw', '_an'))
+            merged = merged.merge(anomalies, on='mac_address', how='left')
         else:
             merged['is_anomaly'] = False
             merged['anomaly_score'] = 0.0
@@ -424,6 +425,7 @@ class PipelineController:
         merged.fillna({
             'predicted_bandwidth_kbps': Config.MIN_BANDWIDTH_KBPS * 2,
             'confidence': 0.0,
+            'is_suspicious': False,
             'is_anomaly': False,
             'anomaly_score': 0.0,
             'confidence_an': 0.0,
@@ -450,8 +452,7 @@ class PipelineController:
             # Confirm anomaly
             confirmed = self.smoother.confirm_anomaly(
                 mac,
-                bool(row['is_anomaly']),
-                float(row.get('confidence_an', 0.8))
+                bool(row.get('is_suspicious', False))
             )
             smoothed.at[idx, 'is_anomaly'] = confirmed
         
