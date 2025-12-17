@@ -197,7 +197,7 @@ class MLModelManager:
         except Exception as e:
             logger.error(f"Anomaly detection failed: {e}")
             result = features_df[['mac_address']].copy()
-            result['is_anomaly'] = False
+            result['is_suspicious'] = False
             result['anomaly_score'] = 0.0
             result['confidence'] = 0.0
             return result

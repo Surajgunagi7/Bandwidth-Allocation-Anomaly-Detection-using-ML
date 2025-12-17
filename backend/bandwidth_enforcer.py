@@ -190,6 +190,15 @@ class TrafficController:
                 self._remove_device_allocation(mac)
             
             # Create new class for this device
+            check = subprocess.run(
+                f"tc class show dev {self.interface} | grep {parent_class}",
+                shell=True, capture_output=True
+            )
+            if check.returncode != 0:
+                logger.warning("Parent class missing, reinitializing TC")
+                self.initialize_qdisc()
+                return
+            
             ceil_bw = min(bw_kbps * 2, Config.get_total_bandwidth() * 1000)
             cmd = f"tc class add dev {self.interface} parent {parent_class} classid {classid} htb rate {bw_kbps}kbit ceil {ceil_bw}kbit"
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
@@ -347,6 +356,11 @@ class BandwidthDecisionEngine:
     
     def process_ml_predictions(self, predictions: List[Dict]):
         """Process ML predictions with improved normalization"""
+
+        if Config.NO_BANDWIDTH_LIMIT_MODE:
+            logger.info("Skipping TC enforcement (NO_BANDWIDTH_LIMIT_MODE)")
+            return
+        
         if self.ap_mac is None:
             self.detect_ap_mac()
         
@@ -416,8 +430,9 @@ class BandwidthDecisionEngine:
                 )
                 
                 old = self.tc_controller.active_allocations.get(device['mac'])
-                if self.should_update(old, allocation):
-                    allocations_to_apply.append(allocation)
+                if old and old.priority == allocation.priority and not self.should_update(old, allocation):
+                    continue
+                allocations_to_apply.append(allocation)
         
         # Apply allocations
         for allocation in allocations_to_apply:
