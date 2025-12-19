@@ -22,7 +22,6 @@ import warnings
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -301,6 +300,7 @@ class PCAPFeatureExtractor:
             packet_sizes = np.array(agg['packet_sizes'])
             features['avg_packet_size'] = np.mean(packet_sizes)
             features['std_packet_size'] = np.std(packet_sizes)
+            # packet_size_variance = normalized std deviation (std / mean)
             features['packet_size_variance'] = np.std(packet_sizes) / (np.mean(packet_sizes) + 1e-6)
             
             # Inter-arrival time

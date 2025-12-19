@@ -252,7 +252,12 @@ class TrafficController:
             return
         
         try:
-            classid = self._get_or_create_class_id(mac)
+            class_num = self.mac_to_class_id.get(mac)
+            if class_num is None:
+                return
+
+            classid = f"1:{class_num}"
+
             priority = self.active_allocations[mac].priority
             
             # Delete filters by priority

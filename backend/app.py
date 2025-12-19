@@ -15,10 +15,11 @@ import shutil
 
 from config import Config
 from ml_integration import PipelineController
-
+    
 app = Flask(__name__)
 CORS(app)
 app.secret_key = Config.SECRET_KEY
+start_time = time.time()
 
 # Logging is now configured in Config
 logger = logging.getLogger(__name__)
@@ -519,7 +520,6 @@ def reset_system():
         return jsonify({"error": str(e)}), 500
 
 
-start_time = time.time()
 
 if __name__ == "__main__":
     logger.info("=" * 60)
