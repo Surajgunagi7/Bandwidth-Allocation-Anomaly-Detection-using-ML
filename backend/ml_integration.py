@@ -36,10 +36,9 @@ class MLModelManager:
     
     ANOMALY_FEATURES = [
         'avg_packet_size','total_bytes','total_packets','flow_duration',
-        'bytes_per_second','packets_per_second','avg_inter_arrival_time',
-        'std_packet_size','unique_dst_ports','tcp_flag_ratio','payload_entropy',
-        'bidirectional_ratio','is_encrypted','connection_rate','failed_connection_ratio',
-        'port_scan_indicator','packet_size_variance','protocol_diversity'
+        'avg_inter_arrival_time','unique_dst_ports','tcp_flag_ratio',
+        'payload_entropy','bidirectional_ratio','is_encrypted',
+        'port_scan_indicator','protocol_diversity'
     ]
 
     
