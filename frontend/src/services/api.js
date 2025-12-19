@@ -1,5 +1,5 @@
 // API Service for WiFi Bandwidth Controller
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'http://10.0.2.15:5000';
 
 class ApiService {
   constructor(baseURL = API_BASE_URL) {
