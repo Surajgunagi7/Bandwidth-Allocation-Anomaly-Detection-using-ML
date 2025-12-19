@@ -1,25 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Wifi, HardDrive, CheckCircle, RefreshCw, Zap, TrendingUp } from 'lucide-react';
-import apiService from '../services/api';
+import { Wifi, Activity, HardDrive, Zap, RefreshCw } from 'lucide-react';
+import api from '../services/api';
+import { cn } from '@/lib/utils';
 
 const SystemStatus = () => {
   const [stats, setStats] = useState(null);
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
 
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [statsData, healthData] = await Promise.all([
-        apiService.getStats(),
-        apiService.getHealth(),
-      ]);
-      setStats(statsData);
-      setHealth(healthData);
-      setError(null);
+      const [s, h] = await Promise.all([api.getStats(), api.getHealth()]);
+      setStats(s);
+      setHealth(h);
     } catch (err) {
-      setError('Failed to fetch system status');
       console.error(err);
     } finally {
       setLoading(false);
@@ -28,146 +23,141 @@ const SystemStatus = () => {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
+    const id = setInterval(fetchData, 5000);
+    return () => clearInterval(id);
   }, []);
 
-  const formatUptime = (seconds) => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    return `${hours}h ${minutes}m`;
+  const formatUptime = (sec) => {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    return `${h}h ${m}m`;
   };
 
-  const StatusCard = ({ title, value, icon: Icon, gradient, suffix = '' }) => (
-    <div className="glass-card p-6 group">
-      <div className="flex items-center justify-between">
-        <div className="flex-1">
-          <p className="text-sm font-medium text-gray-600 mb-1">{title}</p>
-          <p className="text-3xl font-bold text-gray-900">
-            {value}<span className="text-lg text-gray-600">{suffix}</span>
+  const Card = ({ title, value, icon: Icon, gradient, suffix = '' }) => (
+    <div className="w-full bg-white/80 backdrop-blur-sm rounded-xl p-8 shadow-sm border border-slate-200 hover:shadow-md transition-shadow h-44 flex flex-col justify-between group">
+      <div className="flex justify-between items-start flex-1">
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest">{title}</p>
+          <p className="text-4xl font-display font-bold text-slate-900 mt-3 leading-tight tracking-tight">
+            {value}<span className="text-base font-normal text-slate-500 ml-2">{suffix}</span>
           </p>
         </div>
-        <div className={`relative p-4 rounded-2xl ${gradient} transition-smooth group-hover:scale-110`}>
-          <Icon className="w-8 h-8 text-white" />
+        <div className={cn("p-4 rounded-xl shadow-lg shrink-0 ml-3 transition-transform group-hover:scale-110", gradient)}>
+          <Icon className="w-7 h-7 text-white" />
         </div>
       </div>
     </div>
   );
 
-  if (loading && !stats) {
-    return (
-      <div className="glass-card p-12 flex items-center justify-center">
-        <div className="text-center">
-          <RefreshCw className="w-12 h-12 animate-spin text-purple-600 mx-auto mb-4" />
-          <p className="text-gray-600 font-medium">Loading system status...</p>
-        </div>
-      </div>
-    );
-  }
+  const stats_display = stats || {
+    active_devices: 0,
+    total_bandwidth_mbps: 0,
+    uploads_pending: 0,
+    uptime: 0,
+    ap_interface: 'N/A',
+    policy_mode: 'auto',
+    active_overrides: 0,
+    processed_total: 0,
+    errors_total: 0,
+    worker_alive: false
+  };
 
-  if (error) {
-    return (
-      <div className="glass-card p-6 border-l-4 border-red-500">
-        <div className="flex items-center gap-3">
-          <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
-          <p className="text-red-800 font-medium">{error}</p>
-        </div>
-      </div>
-    );
-  }
-
-  const isHealthy = health?.status === 'healthy' && health?.worker_thread;
+  const healthy = health?.status === 'healthy' && health?.worker_alive;
 
   return (
-    <div className="space-y-6">
-      {/* System Health Banner */}
-      <div className={`glass-card p-4 border-l-4 ${isHealthy ? 'border-green-500' : 'border-red-500'}`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`w-3 h-3 rounded-full ${isHealthy ? 'bg-green-500' : 'bg-red-500'} animate-pulse`}></div>
-            <span className={`font-semibold ${isHealthy ? 'text-green-800' : 'text-red-800'}`}>
-              System Status: {isHealthy ? 'Healthy' : 'Degraded'}
-            </span>
+    <div className="space-y-8 w-full relative">
+      {loading && (
+        <div className="absolute inset-0 bg-white/40 backdrop-blur-sm rounded-xl flex items-center justify-center z-10 pointer-events-none" style={{height: '100%'}}>
+          <div className="flex flex-col items-center gap-3">
+            <div className="relative w-12 h-12">
+              <div className="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
+              <div className="absolute inset-0 border-4 border-transparent border-t-blue-500 rounded-full animate-spin"></div>
+            </div>
+            <p className="text-slate-600 font-medium text-sm">Refreshing...</p>
           </div>
-          <button
-            onClick={fetchData}
-            className="btn-pill btn-secondary !py-2 !px-4 !text-xs"
-            title="Refresh"
+        </div>
+      )}
+      {/* System Health Card */}
+      <div className={cn(
+        "w-full bg-white/90 backdrop-blur-md rounded-xl p-8 shadow-sm border-l-4 border border-slate-200 hover:shadow-md transition-all min-h-28 flex items-center",
+        healthy ? 'border-l-emerald-500' : 'border-l-red-500'
+      )}>
+        <div className="flex justify-between items-center w-full">
+          <div className="flex items-center gap-5 flex-1">
+            <div className={cn("w-4 h-4 rounded-full animate-pulse shadow-lg shrink-0", healthy ? 'bg-emerald-500' : 'bg-red-500')}></div>
+            <div className="min-w-0">
+              <p className="text-xl font-bold font-display text-slate-900">System Status</p>
+              <p className={cn("text-base font-medium", healthy ? 'text-emerald-600' : 'text-red-600')}>
+                {healthy ? '✓ All Systems Operational' : '✗ Service Degraded'}
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={fetchData} 
+            className="px-6 py-3 h-12 bg-slate-900 hover:bg-slate-800 text-white font-medium rounded-lg text-sm transition-all flex items-center gap-2 shrink-0 ml-4 whitespace-nowrap shadow-md hover:shadow-lg active:scale-95"
+            title="Refresh Status"
           >
-            <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
+            <RefreshCw className={cn("w-4 h-4", loading ? 'animate-spin' : '')} />
+            <span className="hidden sm:inline">Refresh</span>
           </button>
         </div>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-        <StatusCard
-          title="Active Devices"
-          value={stats?.active_devices || 0}
-          icon={Wifi}
-          gradient="bg-gradient-to-br from-purple-500 to-pink-500"
+      <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <Card 
+          title="Active Devices" 
+          value={stats_display.active_devices} 
+          icon={Wifi} 
+          gradient="bg-gradient-to-br from-blue-500 to-indigo-600" 
         />
-        
-        <StatusCard
-          title="Total Bandwidth"
-          value={stats?.total_bandwidth_mbps || 0}
-          icon={Activity}
-          gradient="bg-gradient-to-br from-blue-500 to-cyan-500"
-          suffix=" Mbps"
+        <Card 
+          title="Total Bandwidth" 
+          value={stats_display.total_bandwidth_mbps} 
+          icon={Activity} 
+          gradient="bg-gradient-to-br from-violet-500 to-purple-600" 
+          suffix=" Mbps" 
         />
-        
-        <StatusCard
-          title="Pending Uploads"
-          value={stats?.uploads_pending || 0}
-          icon={HardDrive}
-          gradient="bg-gradient-to-br from-amber-500 to-orange-500"
+        <Card 
+          title="Pending Uploads" 
+          value={stats_display.uploads_pending} 
+          icon={HardDrive} 
+          gradient="bg-gradient-to-br from-amber-500 to-orange-600" 
         />
-        
-        <StatusCard
-          title="System Uptime"
-          value={stats?.uptime ? formatUptime(stats.uptime) : 'N/A'}
-          icon={Zap}
-          gradient="bg-gradient-to-br from-green-500 to-emerald-500"
+        <Card 
+          title="Uptime" 
+          value={formatUptime(stats?.uptime || stats_display.uptime)} 
+          icon={Zap} 
+          gradient="bg-gradient-to-br from-emerald-500 to-teal-600" 
         />
       </div>
 
-      {/* Detailed Info */}
-      <div className="glass-card p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="p-2 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500">
-            <TrendingUp className="w-5 h-5 text-white" />
-          </div>
-          <h3 className="text-lg font-semibold text-gray-900">System Details</h3>
-        </div>
-        
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Interface</p>
-            <p className="font-semibold text-gray-900 text-sm">{stats?.ap_interface || 'N/A'}</p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Policy Mode</p>
-            <span className="badge-pill badge-info">{stats?.policy_mode || 'auto'}</span>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Active Overrides</p>
-            <p className="font-semibold text-gray-900 text-sm">{stats?.active_overrides || 0}</p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Processed Files</p>
-            <p className="font-semibold text-gray-900 text-sm">{stats?.processed_total || 0}</p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Errors</p>
-            <p className="font-semibold text-gray-900 text-sm">{stats?.errors_total || 0}</p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Worker Status</p>
-            <span className={`badge-pill ${stats?.worker_alive ? 'badge-success' : 'badge-error'}`}>
-              {stats?.worker_alive ? 'Running' : 'Stopped'}
-            </span>
-          </div>
+      {/* System Details */}
+      <div className="w-full bg-white/80 backdrop-blur-sm rounded-xl p-8 shadow-sm border border-slate-200">
+        <h3 className="text-lg font-bold font-display text-slate-900 mb-8">System Metrics</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-6">
+          {[
+            { label: 'Interface', value: stats?.ap_interface || stats_display.ap_interface },
+            { label: 'Policy Mode', value: stats?.policy_mode || stats_display.policy_mode, badge: true, type: 'info' },
+            { label: 'Overrides', value: stats?.active_overrides || stats_display.active_overrides },
+            { label: 'Processed', value: stats?.processed_total || stats_display.processed_total },
+            { label: 'Errors', value: stats?.errors_total || stats_display.errors_total },
+            { label: 'Worker', value: (stats?.worker_alive ?? stats_display.worker_alive) ? 'Running' : 'Stopped', badge: true, type: (stats?.worker_alive ?? stats_display.worker_alive) ? 'success' : 'error' },
+          ].map((item, i) => (
+            <div key={i} className="bg-slate-50/50 rounded-lg p-6 text-center hover:bg-slate-50 transition h-28 flex flex-col justify-center border border-slate-200/50">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">{item.label}</p>
+              {item.badge ? (
+                <span className={cn(
+                  "mx-auto inline-block px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border",
+                  item.type === 'info' ? 'bg-blue-50 text-blue-700 border-blue-100' : item.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-red-50 text-red-700 border-red-100'
+                )}>
+                  {item.value}
+                </span>
+              ) : (
+                <p className="text-lg font-bold font-display text-slate-900 truncate">{item.value}</p>
+              )}
+            </div>
+          ))}
         </div>
       </div>
     </div>

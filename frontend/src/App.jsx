@@ -1,166 +1,219 @@
 import React, { useState } from 'react';
-import { Wifi, RefreshCw, Settings2, Sparkles } from 'lucide-react';
+import { Wifi, Settings2, RefreshCw, AlertCircle, CheckCircle, Zap } from 'lucide-react';
 import SystemStatus from './components/SystemStatus';
 import DeviceTable from './components/DeviceTable';
-import AnomalyAlerts from './components/AnomalyAlerts';
 import BandwidthChart from './components/BandwidthChart';
+import AnomalyAlerts from './components/AnomalyAlerts';
 import PolicyControls from './components/PolicyControls';
-import apiService from './services/api';
+
+// Error Boundary Component
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Error caught by boundary:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-6 bg-red-50 border-2 border-red-300 rounded-xl">
+          <div className="flex items-start gap-4">
+            <AlertCircle className="w-6 h-6 text-red-600 mt-1 shrink-0" />
+            <div>
+              <h3 className="font-bold text-red-900 mb-2">Component Error</h3>
+              <p className="text-red-800 text-sm mb-3">{this.state.error?.message}</p>
+              <button
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700"
+              >
+                Reload Page
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 function App() {
-  const [showPolicyModal, setShowPolicyModal] = useState(false);
+  const [showPolicy, setShowPolicy] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [resetting, setResetting] = useState(false);
-  const [resetMessage, setResetMessage] = useState(null);
+  const [message, setMessage] = useState(null);
 
-  const handleDeviceOverride = (device) => {
+  const apiBaseURL = 'http://localhost:8000';
+
+  const handleOverride = (device) => {
     setSelectedDevice(device);
-    setShowPolicyModal(true);
+    setShowPolicy(true);
   };
 
-  const handleResetSystem = async () => {
-    if (!window.confirm('Are you sure you want to reset the entire system? This will clear all TC rules and history.')) {
+  const handleReset = async () => {
+    if (!window.confirm('Are you sure you want to reset the entire system?\n\nThis will clear all bandwidth rules, device overrides, and historical data. The system will return to its default state.')) {
       return;
     }
 
+    setResetting(true);
     try {
-      setResetting(true);
-      await apiService.resetSystem();
-      setResetMessage({ type: 'success', text: 'System reset successfully!' });
-      setTimeout(() => setResetMessage(null), 3000);
-    } catch (err) {
-      setResetMessage({ type: 'error', text: 'Failed to reset system' });
-      setTimeout(() => setResetMessage(null), 3000);
+      const response = await fetch(`${apiBaseURL}/api/reset`, {
+        method: 'POST'
+      });
+      
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'System reset successfully! All configurations cleared.' });
+      } else {
+        throw new Error('Reset failed');
+      }
+    } catch (error) {
+      console.error('Reset error:', error);
+      setMessage({ type: 'error', text: 'Failed to reset system. Please try again.' });
     } finally {
       setResetting(false);
+      setTimeout(() => setMessage(null), 5000);
     }
   };
 
   return (
-    <div className="min-h-screen">
-      {/* Glassmorphic Header */}
-      <header className="glass sticky top-0 z-50 border-b border-white/20">
-        <div className="max-w-[1400px] mx-auto px-6 py-4">
+    <div className="flex flex-col h-screen bg-linear-to-br from-slate-50 via-blue-50 to-indigo-50">
+      {/* Fixed Premium Header */}
+      <header className="fixed top-0 left-0 right-0 w-full bg-white/95 backdrop-blur-md shadow-lg border-b border-slate-200 z-50">
+        <div className="px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
-            {/* Logo & Title */}
-            <div className="flex items-center gap-4">
+            {/* Logo Section */}
+            <div className="flex items-center gap-4 flex-1">
               <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-purple-600 to-pink-600 rounded-2xl blur-lg opacity-50"></div>
-                <div className="relative bg-white/90 p-3 rounded-2xl">
-                  <Wifi className="w-7 h-7 text-purple-600" />
+                <div className="p-3 rounded-2xl bg-linear-to-br from-blue-600 via-indigo-600 to-purple-600 shadow-xl">
+                  <Wifi className="w-7 h-7 text-white" />
                 </div>
+                <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gradient flex items-center gap-2">
-                  WiFi Controller
-                  <Sparkles className="w-5 h-5" />
+                <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-linear-to-r from-blue-600 to-indigo-600">
+                  WiFi Bandwidth Controller
                 </h1>
-                <p className="text-sm text-gray-600 font-medium">
-                  ML-powered bandwidth allocation
+                <p className="text-sm text-slate-600 font-medium flex items-center gap-2 mt-1">
+                  <Zap className="w-3.5 h-3.5 text-yellow-500" />
+                  ML-Powered Intelligent Traffic Management
                 </p>
               </div>
             </div>
-            
+
             {/* Action Buttons */}
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setShowPolicyModal(true)}
-                className="btn-pill btn-secondary"
+                onClick={() => setShowPolicy(true)}
+                className="px-5 py-3 bg-linear-to-r from-blue-500 via-indigo-500 to-purple-600 hover:from-blue-600 hover:via-indigo-600 hover:to-purple-700 text-white font-bold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center gap-2"
               >
-                <Settings2 className="w-4 h-4" />
-                Policy Settings
+                <Settings2 className="w-5 h-5" />
+                <span className="hidden sm:inline">Policy Controls</span>
               </button>
-              
+
               <button
-                onClick={handleResetSystem}
+                onClick={handleReset}
                 disabled={resetting}
-                className="btn-pill btn-danger"
+                className="px-5 py-3 bg-linear-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white font-bold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {resetting ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Resetting...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="w-4 h-4" />
-                    Reset System
-                  </>
-                )}
+                <RefreshCw className={`w-5 h-5 ${resetting ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{resetting ? 'Resetting...' : 'Reset'}</span>
               </button>
             </div>
           </div>
         </div>
       </header>
 
-      {/* Reset Message */}
-      {resetMessage && (
-        <div className="max-w-[1400px] mx-auto px-6 mt-6 animate-slide-up">
-          <div className={`glass-card p-4 flex items-center gap-3 ${
-            resetMessage.type === 'success' ? 'border-l-4 border-green-500' : 'border-l-4 border-red-500'
-          }`}>
-            <div className={`w-2 h-2 rounded-full ${
-              resetMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'
-            } animate-pulse`}></div>
-            <span className="font-medium text-gray-800">{resetMessage.text}</span>
-          </div>
-        </div>
-      )}
+      {/* Main Content Area */}
+      <main className="flex-1 overflow-y-auto pt-32 pb-24 w-full">
+        <div className="px-4 sm:px-6 lg:px-8 py-12 space-y-12">
+          {/* Global Message Banner */}
+          {message && (
+            <div className={`p-5 rounded-2xl border-2 flex items-center gap-4 shadow-lg ${
+              message.type === 'success'
+                ? 'bg-linear-to-r from-green-50 to-emerald-50 border-green-300'
+                : 'bg-linear-to-r from-red-50 to-rose-50 border-red-300'
+            }`}>
+              {message.type === 'success' ? (
+                <CheckCircle className="w-7 h-7 text-green-600 shrink-0" />
+              ) : (
+                <AlertCircle className="w-7 h-7 text-red-600 shrink-0" />
+              )}
+              <div className="flex-1">
+                <p className={`font-bold text-lg ${
+                  message.type === 'success' ? 'text-green-900' : 'text-red-900'
+                }`}>
+                  {message.text}
+                </p>
+              </div>
+              <button
+                onClick={() => setMessage(null)}
+                className="p-2 hover:bg-white/50 rounded-lg transition-colors"
+              >
+                <span className="text-2xl">×</span>
+              </button>
+            </div>
+          )}
 
-      {/* Main Content */}
-      <main className="max-w-[1400px] mx-auto px-6 py-8">
-        <div className="space-y-8">
-          {/* System Status */}
-          <div className="animate-slide-up">
+          {/* System Status Section */}
+          <ErrorBoundary>
             <SystemStatus />
-          </div>
+          </ErrorBoundary>
 
-          {/* Bandwidth Chart */}
-          <div className="animate-slide-up" style={{ animationDelay: '0.1s' }}>
-            <BandwidthChart />
-          </div>
-
-          {/* Two Column Layout */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Device Table - Spans 2 columns */}
-            <div className="lg:col-span-2 animate-slide-up" style={{ animationDelay: '0.2s' }}>
-              <DeviceTable onOverride={handleDeviceOverride} />
+          {/* Charts and Alerts Grid */}
+          <div className="grid lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2">
+              <ErrorBoundary>
+                <BandwidthChart />
+              </ErrorBoundary>
             </div>
-
-            {/* Anomaly Alerts - Spans 1 column */}
-            <div className="lg:col-span-1 animate-slide-up" style={{ animationDelay: '0.3s' }}>
-              <AnomalyAlerts />
+            <div className="lg:col-span-1">
+              <ErrorBoundary>
+                <AnomalyAlerts />
+              </ErrorBoundary>
             </div>
           </div>
+
+          {/* Connected Devices Section */}
+          <ErrorBoundary>
+            <DeviceTable onOverride={handleOverride} />
+          </ErrorBoundary>
         </div>
       </main>
 
-      {/* Policy Modal with Backdrop */}
-      {showPolicyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay animate-fade-in">
-          <div className="glass-card max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-slide-up">
-            <PolicyControls
-              selectedDevice={selectedDevice}
-              onClose={() => {
-                setShowPolicyModal(false);
-                setSelectedDevice(null);
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Footer */}
-      <footer className="glass mt-16 border-t border-white/20">
-        <div className="max-w-[1400px] mx-auto px-6 py-6">
-          <div className="flex items-center justify-between text-sm text-gray-600">
-            <p className="font-medium">© 2025 WiFi Bandwidth Controller • SDM College of Engineering & Technology</p>
-            <p className="flex items-center gap-2">
-              Powered by <span className="text-gradient font-semibold">Machine Learning</span>
+      {/* Fixed Footer */}
+      <footer className="fixed bottom-0 left-0 right-0 w-full bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-lg z-40">
+        <div className="px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between text-sm">
+            <p className="text-slate-600 font-medium">
+              © 2025 WiFi Bandwidth Controller — Powered by Machine Learning
             </p>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="text-slate-600 font-medium">System Operational</span>
+            </div>
           </div>
         </div>
       </footer>
+
+      {/* Policy Controls Modal */}
+      {showPolicy && (
+        <PolicyControls
+          selectedDevice={selectedDevice}
+          onClose={() => {
+            setShowPolicy(false);
+            setSelectedDevice(null);
+          }}
+        />
+      )}
     </div>
   );
 }

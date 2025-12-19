@@ -1,90 +1,143 @@
-import axios from 'axios';
+// API Service for WiFi Bandwidth Controller
+const API_BASE_URL = 'http://localhost:8000';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-// Request interceptor
-api.interceptors.request.use(
-  (config) => {
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
+class ApiService {
+  constructor(baseURL = API_BASE_URL) {
+    this.baseURL = baseURL;
   }
-);
 
-// Response interceptor
-api.interceptors.response.use(
-  (response) => response.data,
-  (error) => {
-    console.error('API Error:', error.response?.data || error.message);
-    return Promise.reject(error.response?.data || error);
+  // Helper method for fetch requests
+  async request(endpoint, options = {}) {
+    const url = `${this.baseURL}${endpoint}`;
+    const config = {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    };
+
+    try {
+      const response = await fetch(url, config);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error(`API request failed: ${endpoint}`, error);
+      throw error;
+    }
   }
-);
 
-// ============= API Methods =============
+  // System endpoints
+  async getHealth() {
+    return this.request('/health');
+  }
 
-export const apiService = {
-  // Health & Stats
-  getHealth: () => api.get('/health'),
-  
-  getStats: () => api.get('/stats'),
-  
-  // Devices
-  getDevices: () => api.get('/api/devices'),
-  
-  // Anomalies
-  getAnomalies: () => api.get('/api/anomalies'),
-  
-  // History
-  getHistory: (limit = 10) => api.get(`/api/history?limit=${limit}`),
-  
-  // Policy Control
-  setPolicyMode: (mode) => api.post('/api/policy/mode', { mode }),
-  
-  setDeviceOverride: (macAddress, bandwidthKbps, priority, durationSec = null) => 
-    api.post('/api/policy/override', {
-      mac_address: macAddress,
-      bandwidth_kbps: bandwidthKbps,
-      priority,
-      duration_sec: durationSec,
-    }),
-  
-  clearDeviceOverride: (macAddress) => 
-    api.delete(`/api/policy/override/${macAddress}`),
-  
-  // Traffic Control
-  getTCStatus: () => api.get('/api/tc/status'),
-  
-  // System Control
-  resetSystem: () => api.post('/api/reset'),
-  
-  // Upload PCAP
-  uploadPCAP: (file, onProgress) => {
+  async getStats() {
+    return this.request('/stats');
+  }
+
+  async resetSystem() {
+    return this.request('/api/reset', { method: 'POST' });
+  }
+
+  // Device endpoints
+  async getDevices() {
+    return this.request('/api/devices');
+  }
+
+  // Anomaly endpoints
+  async getAnomalies() {
+    return this.request('/api/anomalies');
+  }
+
+  // History endpoints
+  async getHistory(limit = 20) {
+    return this.request(`/api/history?limit=${limit}`);
+  }
+
+  // Policy endpoints
+  async setPolicyMode(mode) {
+    return this.request('/api/policy/mode', {
+      method: 'POST',
+      body: JSON.stringify({ mode }),
+    });
+  }
+
+  async setDeviceOverride(macAddress, bandwidthKbps, priority, durationSec = null) {
+    return this.request('/api/policy/override', {
+      method: 'POST',
+      body: JSON.stringify({
+        mac_address: macAddress,
+        bandwidth_kbps: bandwidthKbps,
+        priority,
+        duration_sec: durationSec,
+      }),
+    });
+  }
+
+  async clearDeviceOverride(macAddress) {
+    return this.request(`/api/policy/override/${macAddress}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Bandwidth configuration
+  async getBandwidthConfig() {
+    return this.request('/api/bandwidth/config');
+  }
+
+  async setBandwidthConfig(bandwidthMbps) {
+    return this.request('/api/bandwidth/config', {
+      method: 'POST',
+      body: JSON.stringify({ bandwidth_mbps: bandwidthMbps }),
+    });
+  }
+
+  // Traffic Control status
+  async getTcStatus() {
+    return this.request('/api/tc/status');
+  }
+
+  // Upload PCAP file
+  async uploadPcap(file) {
     const formData = new FormData();
     formData.append('capture', file);
-    
-    return api.post('/traffic', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      onUploadProgress: (progressEvent) => {
-        if (onProgress) {
-          const percentCompleted = Math.round(
-            (progressEvent.loaded * 100) / progressEvent.total
-          );
-          onProgress(percentCompleted);
-        }
-      },
-    });
-  },
-};
 
-export default apiService;
+    const response = await fetch(`${this.baseURL}/traffic`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Upload failed: ${response.status}`);
+    }
+
+    return await response.json();
+  }
+
+  // Upload raw PCAP data
+  async uploadRawPcap(data, filename = 'capture.pcap') {
+    const response = await fetch(`${this.baseURL}/traffic`, {
+      method: 'POST',
+      headers: {
+        'X-Filename': filename,
+      },
+      body: data,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Upload failed: ${response.status}`);
+    }
+
+    return await response.json();
+  }
+}
+
+// Create singleton instance
+const api = new ApiService();
+
+export default api;
