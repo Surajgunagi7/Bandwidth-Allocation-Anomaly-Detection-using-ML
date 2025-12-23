@@ -35,7 +35,7 @@ except Exception:
 
 # ---------- Defaults ----------
 DEFAULT_ROTATE_SECS = 3
-DEFAULT_BACKEND = "10.0.2.15:5000/traffic"
+DEFAULT_BACKEND = "localhost:5000/traffic"
 DEFAULT_CAPTURE_DIR = "/tmp/captures"
 DEFAULT_LOG_FILE = "/tmp/collector.log"
 DEFAULT_MAX_RETRIES = 5

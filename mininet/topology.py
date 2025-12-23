@@ -90,7 +90,7 @@ def topology(start_collector=False,traffic=False):
         collector_path = repo_root / "mininet" / "collector.py"
 
         iface = "ap1-wlan1"
-        backend_url = "http://10.0.2.15:5000/traffic"   # ← FIXED: reachable from Mininet
+        backend_url = "http://localhost:5000/traffic"   # ← FIXED: reachable from Mininet
         capture_dir = "/tmp/captures"
 
         # Ensure dirs exist
