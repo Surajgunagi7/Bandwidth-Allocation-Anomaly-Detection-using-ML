@@ -111,8 +111,8 @@ def topology(start_collector=False,traffic=False):
             info(f"Collector not found: {collector_path}\n")
 
     if traffic:
-        info("*** Waiting 5s for backend + collector readiness\n")
-        time.sleep(5)
+        info("*** Waiting 3s for backend + collector readiness\n")
+        time.sleep(3)
         start_test_traffic(net, duration=180)
 
     info("*** Running CLI\n   ")
