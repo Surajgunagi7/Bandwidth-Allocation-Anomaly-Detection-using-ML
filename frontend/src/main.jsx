@@ -3,7 +3,6 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
 
-// Add error logging
 window.addEventListener('error', (event) => {
   console.error('Global error:', event.error);
 });

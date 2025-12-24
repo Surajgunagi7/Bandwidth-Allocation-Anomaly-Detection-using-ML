@@ -1,143 +1,144 @@
-// API Service for WiFi Bandwidth Controller
-const API_BASE_URL = 'http://10.0.2.15:5000';
+import axios from "axios";
 
-class ApiService {
-  constructor(baseURL = API_BASE_URL) {
-    this.baseURL = baseURL;
+/**
+ * Axios instance
+ * Base URL is empty so Vite proxy is used
+ */
+const apiClient = axios.create({
+  baseURL: "",
+  timeout: 10000,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+/**
+ * Response interceptor (optional but useful)
+ */
+apiClient.interceptors.response.use(
+  (response) => response.data,
+  (error) => {
+    console.error("API error:", error?.response || error);
+    throw error;
   }
+);
 
-  // Helper method for fetch requests
-  async request(endpoint, options = {}) {
-    const url = `${this.baseURL}${endpoint}`;
-    const config = {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    };
+/**
+ * =========================
+ * SYSTEM / HEALTH
+ * =========================
+ */
+export const getHealth = () => apiClient.get("/health");
 
-    try {
-      const response = await fetch(url, config);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      return await response.json();
-    } catch (error) {
-      console.error(`API request failed: ${endpoint}`, error);
-      throw error;
-    }
-  }
+export const getStats = () => apiClient.get("/stats");
 
-  // System endpoints
-  async getHealth() {
-    return this.request('/health');
-  }
+export const resetSystem = () =>
+  apiClient.post("/api/reset");
 
-  async getStats() {
-    return this.request('/stats');
-  }
+/**
+ * =========================
+ * DEVICES
+ * =========================
+ */
+export const getDevices = () =>
+  apiClient.get("/api/devices");
 
-  async resetSystem() {
-    return this.request('/api/reset', { method: 'POST' });
-  }
+/**
+ * =========================
+ * ANOMALIES
+ * =========================
+ */
+export const getAnomalies = () =>
+  apiClient.get("/api/anomalies");
 
-  // Device endpoints
-  async getDevices() {
-    return this.request('/api/devices');
-  }
+/**
+ * =========================
+ * HISTORY
+ * =========================
+ */
+export const getHistory = (limit = 10) =>
+  apiClient.get(`/api/history?limit=${limit}`);
 
-  // Anomaly endpoints
-  async getAnomalies() {
-    return this.request('/api/anomalies');
-  }
+/**
+ * =========================
+ * POLICY
+ * =========================
+ */
+export const setPolicyMode = (mode) =>
+  apiClient.post("/api/policy/mode", { mode });
 
-  // History endpoints
-  async getHistory(limit = 20) {
-    return this.request(`/api/history?limit=${limit}`);
-  }
+export const setDeviceOverride = ({
+  mac_address,
+  bandwidth_kbps,
+  priority = 2,
+  duration_sec = null,
+}) =>
+  apiClient.post("/api/policy/override", {
+    mac_address,
+    bandwidth_kbps,
+    priority,
+    duration_sec,
+  });
 
-  // Policy endpoints
-  async setPolicyMode(mode) {
-    return this.request('/api/policy/mode', {
-      method: 'POST',
-      body: JSON.stringify({ mode }),
-    });
-  }
+export const clearDeviceOverride = (macAddress) =>
+  apiClient.delete(`/api/policy/override/${macAddress}`);
 
-  async setDeviceOverride(macAddress, bandwidthKbps, priority, durationSec = null) {
-    return this.request('/api/policy/override', {
-      method: 'POST',
-      body: JSON.stringify({
-        mac_address: macAddress,
-        bandwidth_kbps: bandwidthKbps,
-        priority,
-        duration_sec: durationSec,
-      }),
-    });
-  }
+/**
+ * =========================
+ * BANDWIDTH CONFIG
+ * =========================
+ */
+export const getBandwidthConfig = () =>
+  apiClient.get("/api/bandwidth/config");
 
-  async clearDeviceOverride(macAddress) {
-    return this.request(`/api/policy/override/${macAddress}`, {
-      method: 'DELETE',
-    });
-  }
+export const setBandwidthConfig = (bandwidth_mbps) =>
+  apiClient.post("/api/bandwidth/config", {
+    bandwidth_mbps,
+  });
 
-  // Bandwidth configuration
-  async getBandwidthConfig() {
-    return this.request('/api/bandwidth/config');
-  }
+/**
+ * =========================
+ * TC STATUS
+ * =========================
+ */
+export const getTcStatus = () =>
+  apiClient.get("/api/tc/status");
 
-  async setBandwidthConfig(bandwidthMbps) {
-    return this.request('/api/bandwidth/config', {
-      method: 'POST',
-      body: JSON.stringify({ bandwidth_mbps: bandwidthMbps }),
-    });
-  }
+/**
+ * =========================
+ * PCAP UPLOAD (OPTIONAL / ADMIN)
+ * =========================
+ * This should NOT be called from normal UI flows.
+ */
+export const uploadPcap = (file) => {
+  const formData = new FormData();
+  formData.append("capture", file);
 
-  // Traffic Control status
-  async getTcStatus() {
-    return this.request('/api/tc/status');
-  }
+  return apiClient.post("/traffic", formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  });
+};
 
-  // Upload PCAP file
-  async uploadPcap(file) {
-    const formData = new FormData();
-    formData.append('capture', file);
 
-    const response = await fetch(`${this.baseURL}/traffic`, {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Upload failed: ${response.status}`);
-    }
-
-    return await response.json();
-  }
-
-  // Upload raw PCAP data
-  async uploadRawPcap(data, filename = 'capture.pcap') {
-    const response = await fetch(`${this.baseURL}/traffic`, {
-      method: 'POST',
-      headers: {
-        'X-Filename': filename,
-      },
-      body: data,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Upload failed: ${response.status}`);
-    }
-
-    return await response.json();
-  }
-}
-
-// Create singleton instance
-const api = new ApiService();
+const api = {
+  client: apiClient,
+  getHealth,
+  getStats,
+  resetSystem,
+  getDevices,
+  getAnomalies,
+  getHistory,
+  setPolicyMode,
+  setDeviceOverride,
+  clearDeviceOverride,
+  getBandwidthConfig,
+  setBandwidthConfig,
+  getTcStatus,
+  uploadPcap,
+};
 
 export default api;
+
+
