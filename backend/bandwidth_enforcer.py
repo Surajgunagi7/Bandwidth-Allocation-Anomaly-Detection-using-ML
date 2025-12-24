@@ -456,8 +456,12 @@ class BandwidthDecisionEngine:
 if __name__ == "__main__":
     def mock_predictions():
         return [
-            {'mac_address': '00:11:22:33:44:55', 'predicted_bandwidth_kbps': 5000,
-             'traffic_class': 'video', 'is_anomaly': False}
+            {
+                'mac_address': '00:11:22:33:44:55', 
+                'predicted_bandwidth_kbps': 5000,
+                'traffic_class': 'video', 
+                'is_anomaly': False
+            }
         ]
     
     engine = BandwidthDecisionEngine(interface="ap1-wlan1")

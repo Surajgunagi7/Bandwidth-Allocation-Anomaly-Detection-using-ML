@@ -156,7 +156,7 @@ class MLModelManager:
 
         if self.anomaly_model is None or features_df.empty:
             result = features_df[['mac_address']].copy() if not features_df.empty else pd.DataFrame(columns=['mac_address'])
-            result['is_anomaly'] = False
+            result['is_suspicious'] = False
             result['anomaly_score'] = 0.0
             result['confidence'] = 0.0
             return result
@@ -270,7 +270,6 @@ class TemporalSmoother:
 
         return self.anomaly_counts[mac] >= self.anomaly_consensus
 
-    
     def reset_device(self, mac: str):
         """Clear history"""
         self.history.pop(mac, None)
@@ -425,7 +424,6 @@ class PipelineController:
             'predicted_bandwidth_kbps': Config.MIN_BANDWIDTH_KBPS * 2,
             'confidence': 0.0,
             'is_suspicious': False,
-            'is_anomaly': False,
             'anomaly_score': 0.0,
             'confidence_an': 0.0,
             'traffic_class': 'unknown'
