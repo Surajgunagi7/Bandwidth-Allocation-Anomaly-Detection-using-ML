@@ -452,6 +452,16 @@ class PipelineController:
                 bool(row.get('is_suspicious', False))
             )
             smoothed.at[idx, 'is_anomaly'] = confirmed
+            if confirmed:
+                logger.warning(
+                        f"🚨 ANOMALY CONFIRMED | MAC={mac} | "
+                        f"smoothed_bw={smoothed_bw} kbps | "
+                        f"suspicious_count={self.smoother.anomaly_counts.get(mac, 0)}"
+                )
+            else:
+                logger.info(
+                    f"Device {mac}: Smoothed BW={smoothed_bw} kbps, Anomaly=False"
+                )
         
         return smoothed
     
