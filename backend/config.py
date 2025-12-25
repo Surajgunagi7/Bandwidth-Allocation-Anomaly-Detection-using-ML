@@ -132,7 +132,7 @@ class Config:
     BATCH_SIZE = int(os.getenv("ML_BATCH_SIZE", "10"))
     PREDICTION_THRESHOLD = float(os.getenv("PREDICTION_THRESHOLD", "0.7"))
     
-    # Known AP MAC addresses (will be auto-detected)
+    # KNOWN_AP_MACS is intentionally mutable (runtime AP detection)
     KNOWN_AP_MACS = {"02:00:00:00:03:00"}
     
     # Traffic Control
@@ -212,11 +212,14 @@ class Config:
         errors = []
         
         # Check if models exist
-        required_models = [
-            cls.MODELS_DIR / "bandwidth_predictor.pkl",
-            cls.MODELS_DIR / "anomaly_detector.pkl",
-        ]
-        
+        required_models = []
+
+        if not cls.NO_BANDWIDTH_LIMIT_MODE:
+            required_models.append(cls.MODELS_DIR / "bandwidth_predictor.pkl")
+
+        if not cls.NO_ANOMALY_MODE:
+            required_models.append(cls.MODELS_DIR / "anomaly_detector.pkl")
+
         missing_models = [str(m) for m in required_models if not m.exists()]
         if missing_models:
             errors.append(f"Missing model files: {missing_models}")

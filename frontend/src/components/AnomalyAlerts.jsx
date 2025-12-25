@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Clock, Activity, Shield } from 'lucide-react';
-import apiService from '../services/api';
+import React, { useEffect, useState } from 'react';
+import { AlertTriangle, Clock, TrendingUp, Shield } from 'lucide-react';
+import api from '@/services/api';
+import { cn } from '@/lib/utils';
 
 const AnomalyAlerts = () => {
   const [anomalies, setAnomalies] = useState([]);
@@ -8,7 +9,7 @@ const AnomalyAlerts = () => {
 
   const fetchAnomalies = async () => {
     try {
-      const data = await apiService.getAnomalies();
+      const data = await api.getAnomalies();
       setAnomalies(data.anomalies || []);
     } catch (err) {
       console.error('Failed to fetch anomalies:', err);
@@ -23,119 +24,89 @@ const AnomalyAlerts = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const formatTimestamp = (timestamp) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffMins = Math.floor(diffMs / 60000);
-    
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    
+  const formatTimestamp = (ts) => {
+    if (!ts) return 'Unknown time';
+    const date = ts > 1e12 ? new Date(ts) : new Date(ts * 1000);
+    const diff = Math.floor((Date.now() - date.getTime()) / 60000);
+    if (diff < 1) return 'Just now';
+    if (diff < 60) return `${diff}m ago`;
+    if (diff < 1440) return `${Math.floor(diff / 60)}h ago`;
     return date.toLocaleDateString();
   };
 
-  const getAnomalyScoreColor = (score) => {
-    if (score >= 0.8) return 'from-red-500 to-pink-500';
-    if (score >= 0.6) return 'from-orange-500 to-amber-500';
-    return 'from-yellow-500 to-amber-500';
+  const severity = (score = 0) => {
+    if (score >= 0.8) return { label: 'Critical', color: 'red' };
+    if (score >= 0.6) return { label: 'Warning', color: 'amber' };
+    return { label: 'Notice', color: 'yellow' };
   };
 
-  if (loading) {
-    return (
-      <div className="glass-card p-6">
-        <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="loading-shimmer h-20 rounded-2xl"></div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="glass-card overflow-hidden">
-      {/* Header */}
-      <div className="p-6 border-b border-gray-200/50">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-gradient-to-br from-red-500 to-pink-500">
-              <AlertTriangle className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900">Anomaly Alerts</h2>
-              <p className="text-sm text-gray-600">{anomalies.length} active alerts</p>
-            </div>
-          </div>
+    <div className="bg-white rounded-xl border overflow-hidden relative">
+      {loading && (
+        <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10">
+          <p className="text-slate-500 font-medium">Scanning anomalies…</p>
+        </div>
+      )}
+
+      <div className="p-6 border-b bg-slate-50 flex items-center gap-3">
+        <AlertTriangle className="w-6 h-6 text-red-600" />
+        <div>
+          <h2 className="font-bold text-slate-900">Security Alerts</h2>
+          <p className="text-sm text-slate-500">
+            {anomalies.length} active alert{anomalies.length !== 1 && 's'}
+          </p>
         </div>
       </div>
 
-      {/* Anomaly List */}
-      <div className="max-h-[600px] overflow-y-auto">
+      <div className="divide-y max-h-96 overflow-y-auto">
         {anomalies.length === 0 ? (
-          <div className="p-16 text-center">
-            <div className="inline-flex p-4 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 mb-4">
-              <Shield className="w-12 h-12 text-white" />
-            </div>
-            <p className="text-gray-900 font-semibold mb-2">All Clear!</p>
-            <p className="text-sm text-gray-600">No anomalies detected</p>
+          <div className="p-10 text-center text-slate-500">
+            <Shield className="w-10 h-10 mx-auto mb-2 text-emerald-500" />
+            No anomalies detected
           </div>
         ) : (
-          <div className="divide-y divide-gray-200/50">
-            {anomalies.map((anomaly, index) => (
-              <div
-                key={`${anomaly.mac_address}-${index}`}
-                className="p-4 transition-smooth hover:bg-white/50"
-              >
-                <div className="flex items-start gap-3">
-                  {/* Score Indicator */}
-                  <div className={`p-2 rounded-xl bg-gradient-to-br ${getAnomalyScoreColor(anomaly.anomaly_score)}`}>
-                    <AlertTriangle className="w-4 h-4 text-white" />
-                  </div>
+          anomalies.map((a, i) => {
+            const sev = severity(a.anomaly_score);
+            return (
+              <div key={i} className="p-5 flex justify-between gap-4">
+                <div>
+                  <p className="font-semibold">
+                    Device {a.mac?.slice(-5)}
+                  </p>
+                  <p className="text-xs text-slate-500 font-mono">{a.mac}</p>
 
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="font-semibold text-gray-900 text-sm truncate">
-                        {anomaly.mac_address}
-                      </span>
-                      <span className="badge-pill badge-error !text-xs">
-                        {(anomaly.anomaly_score * 100).toFixed(0)}% risk
-                      </span>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div>
-                        <p className="text-gray-500 mb-0.5">Traffic Type</p>
-                        <p className="font-medium text-gray-900 capitalize">
-                          {anomaly.traffic_class?.replace('_', ' ')}
-                        </p>
-                      </div>
-                      
-                      <div>
-                        <p className="text-gray-500 mb-0.5">Bandwidth</p>
-                        <p className="font-medium text-gray-900">
-                          {anomaly.bandwidth_kbps >= 1000 
-                            ? `${(anomaly.bandwidth_kbps / 1000).toFixed(1)} Mbps`
-                            : `${anomaly.bandwidth_kbps} kbps`}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1 mt-2 text-gray-500">
+                  <div className="flex gap-4 mt-2 text-xs text-slate-500">
+                    <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
-                      <span className="text-xs">
-                        {formatTimestamp(anomaly.timestamp)}
+                      {formatTimestamp(a.timestamp)}
+                    </span>
+                    {a.bandwidth_kbps && (
+                      <span className="flex items-center gap-1">
+                        <TrendingUp className="w-3 h-3" />
+                        {(a.bandwidth_kbps / 1000).toFixed(2)} Mbps
                       </span>
-                    </div>
+                    )}
                   </div>
                 </div>
+
+                <div className="text-right">
+                  <span
+                    className={cn(
+                      'px-3 py-1 rounded-full text-xs font-bold',
+                      sev.color === 'red' && 'bg-red-100 text-red-700',
+                      sev.color === 'amber' && 'bg-amber-100 text-amber-700',
+                      sev.color === 'yellow' && 'bg-yellow-100 text-yellow-700'
+                    )}
+                  >
+                    {sev.label}
+                  </span>
+                  <p className="text-xs font-semibold text-slate-500 mt-1">
+                    {(a.anomaly_score * 100).toFixed(0)}% risk
+                  </p>
+                </div>
               </div>
-            ))}
-          </div>
+            );
+          })
         )}
       </div>
     </div>

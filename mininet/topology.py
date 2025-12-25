@@ -71,7 +71,6 @@ def topology(start_collector=False,traffic=False):
     info("*** Configuring WiFi nodes\n")
     net.configureWifiNodes()
 
-    # Link wired host to AP
     net.addLink(h1, ap1)
 
     info("*** Starting network\n")
@@ -90,7 +89,7 @@ def topology(start_collector=False,traffic=False):
         collector_path = repo_root / "mininet" / "collector.py"
 
         iface = "ap1-wlan1"
-        backend_url = "http://10.0.2.15:5000/traffic"   # ← FIXED: reachable from Mininet
+        backend_url = "http://localhost:5000/traffic"   
         capture_dir = "/tmp/captures"
 
         # Ensure dirs exist
@@ -111,9 +110,9 @@ def topology(start_collector=False,traffic=False):
             info(f"Collector not found: {collector_path}\n")
 
     if traffic:
-        info("*** Waiting 5s for backend + collector readiness\n")
-        time.sleep(5)
-        start_test_traffic(net, duration=180)
+        info("*** Waiting 3s for backend + collector readiness\n")
+        time.sleep(3)
+        start_test_traffic(net)
 
     info("*** Running CLI\n   ")
     CLI(net)
@@ -140,21 +139,17 @@ def start_test_traffic(net, duration=180):
     sta3 = net.get('sta3')
     h1 = net.get('h1')
 
-    # Cleanup
     h1.cmd("pkill -f iperf || true")
     h1.cmd("pkill -f http.server || true")
 
-    # Start servers
     h1.cmd("iperf -s -D")
     h1.cmd("iperf -s -u -D")
     h1.cmd("python3 -m http.server 80 &")
 
-    # 🔴 sta1 — High bandwidth TCP bulk
     sta1.cmd(
         f"iperf -c {h1.IP()} -t {duration} -i 1 &"
     )
 
-    # 🟡 sta2 — Medium HTTP-like traffic
     sta2.cmd(
         f"while true; do "
         f"wget -O /dev/null http://{h1.IP()}:80 || true; "
@@ -162,12 +157,51 @@ def start_test_traffic(net, duration=180):
         f"done &"
     )
 
-    # 🟢 sta3 — Low steady UDP
     sta3.cmd(
         f"iperf -u -c {h1.IP()} -b 512K -t {duration} &"
     )
 
     info("*** Demo traffic started\n")
+
+
+def start_attack_traffic(net, duration=180):
+    print("Starting UDP Flood attack traffic (chaotic)")
+
+    sta1 = net.get('sta1')
+    sta2 = net.get('sta2')
+    sta3 = net.get('sta3')
+    h1 = net.get('h1')
+
+    server_ip = h1.IP()
+
+    h1.cmd("pkill -f iperf || true")
+    h1.cmd("iperf -s -u &")
+
+    sta1.cmd(
+        f"while true; do "
+        f"iperf -c {server_ip} -u -b 80M -l 1400 -t 3; "
+        f"sleep 0.3; "
+        f"iperf -c {server_ip} -u -b 5M -l 400 -t 2; "
+        f"sleep 0.2; "
+        f"done &"
+    )
+
+    sta2.cmd(
+        f"while true; do "
+        f"iperf -c {server_ip} -u -b 60M -l 1200 -t 4; "
+        f"sleep 0.1; "
+        f"done &"
+    )
+
+    sta3.cmd(
+        f"while true; do "
+        f"iperf -c {server_ip} -u -b 90M -l 200 -t 1; "
+        f"sleep 0.5; "
+        f"done &"
+    )
+
+    time.sleep(duration)
+    h1.cmd("pkill -f iperf || true")
 
 
 if __name__ == '__main__':

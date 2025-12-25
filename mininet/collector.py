@@ -35,7 +35,7 @@ except Exception:
 
 # ---------- Defaults ----------
 DEFAULT_ROTATE_SECS = 3
-DEFAULT_BACKEND = "10.0.2.15:5000/traffic"
+DEFAULT_BACKEND = "localhost:5000/traffic"
 DEFAULT_CAPTURE_DIR = "/tmp/captures"
 DEFAULT_LOG_FILE = "/tmp/collector.log"
 DEFAULT_MAX_RETRIES = 5
@@ -241,7 +241,6 @@ def watchdog_loop(incoming: Path, q: queue.Queue, logger, poll_interval=1.0, rot
                 except Exception:
                     continue
                 
-                # Wait a bit to check stability
                 time.sleep(max(0.2, min(1.0, rotate_secs / 3)))
                 
                 try:

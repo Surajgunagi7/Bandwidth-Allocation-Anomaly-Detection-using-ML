@@ -1,6 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { Monitor, AlertTriangle, TrendingUp, Settings, Cpu } from 'lucide-react';
-import apiService from '../services/api';
+import React, { useEffect, useState } from 'react';
+import {
+  Cpu,
+  AlertTriangle,
+  Settings,
+  Laptop,
+  Smartphone,
+  Tv,
+  Wifi,
+} from 'lucide-react';
+
+import api from '@/services/api';
+import { cn } from '@/lib/utils';
 
 const DeviceTable = ({ onOverride }) => {
   const [devices, setDevices] = useState([]);
@@ -9,12 +19,12 @@ const DeviceTable = ({ onOverride }) => {
 
   const fetchDevices = async () => {
     try {
-      const data = await apiService.getDevices();
+      const data = await api.getDevices();
       setDevices(data.devices || []);
       setError(null);
     } catch (err) {
-      setError('Failed to fetch devices');
       console.error(err);
+      setError('Failed to fetch devices');
     } finally {
       setLoading(false);
     }
@@ -26,179 +36,133 @@ const DeviceTable = ({ onOverride }) => {
     return () => clearInterval(interval);
   }, []);
 
-  const getPriorityLabel = (priority) => {
-    const labels = { 1: 'High', 2: 'Medium', 3: 'Low' };
-    return labels[priority] || 'Unknown';
-  };
+  const getPriorityColor = (priority) => ({
+    1: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    2: 'bg-amber-100 text-amber-700 border-amber-200',
+    3: 'bg-red-100 text-red-700 border-red-200',
+  }[priority] || 'bg-slate-100 text-slate-700 border-slate-200');
 
-  const getPriorityBadge = (priority) => {
-    const badges = {
-      1: 'badge-success',
-      2: 'badge-warning', 
-      3: 'badge-error',
-    };
-    return badges[priority] || 'badge-info';
-  };
+  const getPriorityLabel = (priority) => ({
+    1: 'High',
+    2: 'Medium',
+    3: 'Low',
+  }[priority] || 'Unknown');
 
-  const getTrafficIcon = (trafficClass) => {
-    const icons = {
-      'video_conference': '🎥',
-      'video': '📹',
-      'voip': '📞',
-      'streaming': '🎬',
-      'web': '🌐',
-      'bulk': '📦',
-      'file_transfer': '📁',
-      'unknown': '❓',
-    };
-    return icons[trafficClass] || '❓';
-  };
-
-  const formatBandwidth = (kbps) => {
-    if (kbps >= 1000) {
-      return `${(kbps / 1000).toFixed(1)} Mbps`;
-    }
-    return `${kbps} kbps`;
-  };
-
-  const handleOverrideClick = (device) => {
-    if (onOverride) {
-      onOverride(device);
-    }
+  const getDeviceIcon = (trafficClass = '') => {
+    const t = trafficClass.toLowerCase();
+    if (t.includes('video')) return Tv;
+    if (t.includes('voip')) return Smartphone;
+    if (t.includes('bulk')) return Laptop;
+    return Wifi;
   };
 
   if (loading) {
     return (
-      <div className="glass-card p-8">
-        <div className="space-y-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="loading-shimmer h-16 rounded-2xl"></div>
-          ))}
-        </div>
+      <div className="bg-white rounded-xl border h-64 flex items-center justify-center">
+        <p className="text-slate-500 font-medium">Loading connected devices…</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="glass-card p-6 border-l-4 border-red-500">
-        <div className="flex items-center gap-3">
-          <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
-          <p className="text-red-800 font-medium">{error}</p>
-        </div>
+      <div className="bg-red-50 border border-red-200 rounded-xl p-6 flex items-center gap-3">
+        <AlertTriangle className="w-6 h-6 text-red-600" />
+        <p className="text-red-700 font-semibold">{error}</p>
       </div>
     );
   }
 
   return (
-    <div className="glass-card overflow-hidden">
-      {/* Header */}
-      <div className="p-6 border-b border-gray-200/50">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500">
-              <Cpu className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900">Active Devices</h2>
-              <p className="text-sm text-gray-600">{devices.length} devices connected</p>
-            </div>
+    <div className="bg-white rounded-xl border overflow-hidden">
+      <div className="p-6 border-b bg-slate-50">
+        <div className="flex items-center gap-4">
+          <div className="p-3 rounded-xl bg-blue-600 text-white">
+            <Cpu className="w-6 h-6" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold">Connected Devices</h2>
+            <p className="text-sm text-slate-500">
+              {devices.length} device{devices.length !== 1 ? 's' : ''} active
+            </p>
           </div>
         </div>
       </div>
 
-      {devices.length === 0 ? (
-        <div className="p-16 text-center">
-          <div className="inline-flex p-4 rounded-full bg-gray-100 mb-4">
-            <Monitor className="w-12 h-12 text-gray-400" />
+      <div className="divide-y">
+        {devices.length === 0 ? (
+          <div className="p-10 text-center text-slate-500">
+            No active devices
           </div>
-          <p className="text-gray-600 font-medium mb-2">No active devices</p>
-          <p className="text-sm text-gray-500">Devices will appear here once traffic is detected</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead>
-              <tr>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                  Device
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                  Traffic Type
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                  Bandwidth
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                  Priority
-                </th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-4 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {devices.map((device, index) => (
-                <tr key={device.mac} className="transition-smooth hover:bg-white/50" style={{ animationDelay: `${index * 0.05}s` }}>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500">
-                        <Monitor className="w-4 h-4 text-white" />
-                      </div>
-                      <div>
-                        <div className="text-sm font-semibold text-gray-900">{device.mac}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">{getTrafficIcon(device.traffic_class)}</span>
-                      <span className="text-sm font-medium text-gray-700 capitalize">
-                        {device.traffic_class?.replace('_', ' ') || 'Unknown'}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <TrendingUp className="w-4 h-4 text-purple-600" />
-                      <span className="text-sm font-bold text-gray-900">
-                        {formatBandwidth(device.bandwidth_kbps)}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`badge-pill ${getPriorityBadge(device.priority)}`}>
-                      {getPriorityLabel(device.priority)}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    {device.is_anomaly ? (
-                      <div className="flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4 text-red-600" />
-                        <span className="badge-pill badge-error !text-xs">Anomaly</span>
-                      </div>
-                    ) : (
-                      <span className="badge-pill badge-success !text-xs">Normal</span>
+        ) : (
+          devices.map((device) => {
+            const Icon = getDeviceIcon(device.traffic_class);
+            const isAnomaly = device.is_anomaly;
+
+            return (
+              <div key={device.mac} className="p-6 flex justify-between items-start">
+                <div className="flex gap-4">
+                  <div
+                    className={cn(
+                      'p-3 rounded-lg border',
+                      isAnomaly
+                        ? 'bg-red-50 border-red-200 text-red-600'
+                        : 'bg-white border-slate-200 text-slate-500'
                     )}
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <button
-                      onClick={() => handleOverrideClick(device)}
-                      className="btn-pill btn-secondary !py-2 !px-4 !text-xs"
-                    >
-                      <Settings className="w-3 h-3" />
-                      Override
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+                  >
+                    <Icon className="w-6 h-6" />
+                  </div>
+
+                  <div>
+                    <h3 className="font-semibold text-slate-900">
+                      Device {device.mac.slice(-5)}
+                    </h3>
+                    <p className="text-xs font-mono text-slate-500">
+                      {device.mac}
+                    </p>
+
+                    <div className="flex gap-6 mt-3">
+                      <div>
+                        <p className="text-xs text-slate-400">Bandwidth</p>
+                        <p className="font-mono font-bold">
+                          {(device.bandwidth_kbps / 1000).toFixed(2)} Mbps
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-xs text-slate-400">Priority</p>
+                        <span
+                          className={cn(
+                            'px-2 py-0.5 text-xs font-bold rounded border',
+                            getPriorityColor(device.priority)
+                          )}
+                        >
+                          {getPriorityLabel(device.priority)}
+                        </span>
+                      </div>
+
+                      {isAnomaly && (
+                        <div className="flex items-center gap-1 text-red-600 text-xs font-semibold">
+                          <AlertTriangle className="w-4 h-4" />
+                          Anomaly
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => onOverride(device)}
+                  className="px-4 py-2 text-sm border rounded-lg hover:bg-blue-50 flex items-center gap-2"
+                >
+                  <Settings className="w-4 h-4" />
+                  Configure
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 };
