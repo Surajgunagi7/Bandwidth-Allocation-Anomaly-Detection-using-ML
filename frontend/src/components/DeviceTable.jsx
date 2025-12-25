@@ -36,18 +36,6 @@ const DeviceTable = ({ onOverride }) => {
     return () => clearInterval(interval);
   }, []);
 
-  const getPriorityColor = (priority) => ({
-    1: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-    2: 'bg-amber-100 text-amber-700 border-amber-200',
-    3: 'bg-red-100 text-red-700 border-red-200',
-  }[priority] || 'bg-slate-100 text-slate-700 border-slate-200');
-
-  const getPriorityLabel = (priority) => ({
-    1: 'High',
-    2: 'Medium',
-    3: 'Low',
-  }[priority] || 'Unknown');
-
   const getDeviceIcon = (trafficClass = '') => {
     const t = trafficClass.toLowerCase();
     if (t.includes('video')) return Tv;
@@ -55,14 +43,6 @@ const DeviceTable = ({ onOverride }) => {
     if (t.includes('bulk')) return Laptop;
     return Wifi;
   };
-
-  if (loading) {
-    return (
-      <div className="bg-white rounded-xl border h-64 flex items-center justify-center">
-        <p className="text-slate-500 font-medium">Loading connected devices…</p>
-      </div>
-    );
-  }
 
   if (error) {
     return (
@@ -97,7 +77,8 @@ const DeviceTable = ({ onOverride }) => {
         ) : (
           devices.map((device) => {
             const Icon = getDeviceIcon(device.traffic_class);
-            const isAnomaly = device.is_anomaly;
+            const isAnomaly = Boolean(device.is_anomaly);
+            const isSuspicious = device.is_suspicious && !device.is_anomaly;
 
             return (
               <div key={device.mac} className="p-6 flex justify-between items-start">
@@ -107,6 +88,8 @@ const DeviceTable = ({ onOverride }) => {
                       'p-3 rounded-lg border',
                       isAnomaly
                         ? 'bg-red-50 border-red-200 text-red-600'
+                        : isSuspicious
+                        ? 'bg-amber-50 border-amber-200 text-amber-600'
                         : 'bg-white border-slate-200 text-slate-500'
                     )}
                   >
@@ -114,37 +97,43 @@ const DeviceTable = ({ onOverride }) => {
                   </div>
 
                   <div>
-                    <h3 className="font-semibold text-slate-900">
-                      Device {device.mac.slice(-5)}
-                    </h3>
+                    <div className="flex items-center gap-3">
+                      <h3 className="font-semibold text-slate-900">
+                        Device {device.mac.slice(-5)}
+                      </h3>
+
+                      {isAnomaly && (
+                        <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-red-100 text-red-700 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" />
+                          Anomaly
+                        </span>
+                      )}
+
+                      {isSuspicious && (
+                        <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-amber-100 text-amber-700">
+                          Suspicious
+                        </span>
+                      )}
+                    </div>
+
                     <p className="text-xs font-mono text-slate-500">
                       {device.mac}
                     </p>
 
-                    <div className="flex gap-6 mt-3">
+                    <div className="flex gap-8 mt-3">
                       <div>
-                        <p className="text-xs text-slate-400">Bandwidth</p>
+                        <p className="text-xs text-slate-400">Allocated Bandwidth</p>
                         <p className="font-mono font-bold">
                           {(device.bandwidth_kbps / 1000).toFixed(2)} Mbps
                         </p>
                       </div>
 
-                      <div>
-                        <p className="text-xs text-slate-400">Priority</p>
-                        <span
-                          className={cn(
-                            'px-2 py-0.5 text-xs font-bold rounded border',
-                            getPriorityColor(device.priority)
-                          )}
-                        >
-                          {getPriorityLabel(device.priority)}
-                        </span>
-                      </div>
-
-                      {isAnomaly && (
-                        <div className="flex items-center gap-1 text-red-600 text-xs font-semibold">
-                          <AlertTriangle className="w-4 h-4" />
-                          Anomaly
+                      {device.traffic_class && device.traffic_class !== 'unknown' && (
+                        <div>
+                          <p className="text-xs text-slate-400">Traffic Type</p>
+                          <p className="text-sm font-medium text-slate-700 capitalize">
+                            {device.traffic_class}
+                          </p>
                         </div>
                       )}
                     </div>

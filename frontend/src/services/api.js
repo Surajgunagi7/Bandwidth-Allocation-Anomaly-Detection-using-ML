@@ -80,8 +80,8 @@ export const setDeviceOverride = ({
     duration_sec,
   });
 
-export const clearDeviceOverride = (macAddress) =>
-  apiClient.delete(`/api/policy/override/${macAddress}`);
+export const clearDeviceOverride = (mac_address) =>
+  apiClient.delete(`/api/policy/override/${mac_address}`);
 
 /**
  * =========================
@@ -122,6 +122,13 @@ export const uploadPcap = (file) => {
 };
 
 
+export const getPolicyMode = async () => {
+  const stats = await getStats();
+  return stats.policy_mode;
+};
+
+
+
 const api = {
   client: apiClient,
   getHealth,
@@ -137,6 +144,7 @@ const api = {
   setBandwidthConfig,
   getTcStatus,
   uploadPcap,
+  getPolicyMode,
 };
 
 export default api;

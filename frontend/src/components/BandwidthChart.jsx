@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   LineChart,
   Line,
@@ -9,101 +9,101 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  ResponsiveContainer
+  ResponsiveContainer,
 } from 'recharts';
-import { BarChart3, TrendingUp } from 'lucide-react';
+import { BarChart3, RefreshCw, TrendingUp } from 'lucide-react';
 import api from '@/services/api';
 import { cn } from '@/lib/utils';
 
+const POLL_INTERVAL_MS = 5000;
+const HISTORY_LIMIT = 30;
+
 const BandwidthChart = () => {
   const [data, setData] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('total');
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [view, setView] = useState('total'); // 'total' | 'devices'
 
-  const fetchHistory = async () => {
+  const fetchHistory = async (isInitial = false) => {
     try {
-      setLoading(true);
-      const res = await api.getHistory(20);
+      if (isInitial) setInitialLoading(true);
+      else setRefreshing(true);
+
+      const res = await api.getHistory(HISTORY_LIMIT);
       const history = res?.history || [];
 
-      const transformed = history.map(entry => {
-        const date = new Date(entry.timestamp);
-        const timeLabel = date.toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit'
+      // Oldest → newest
+      const transformed = history
+        .slice()
+        .reverse()
+        .map((entry) => {
+          const date = new Date(entry.timestamp);
+          const time = date.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          });
+
+          let total = 0;
+          const devices = {};
+
+          (entry.final || []).forEach((item) => {
+            const mac = item.mac_address || 'unknown';
+            const mbps = (item.predicted_bandwidth_kbps || 0) / 1000;
+            devices[mac] = mbps;
+            total += mbps;
+          });
+
+          return { time, total, ...devices };
         });
-
-        let high = 0;
-        let medium = 0;
-        let low = 0;
-
-        (entry.final || []).forEach(item => {
-          const mbps = (item.predicted_bandwidth_kbps || 0) / 1000;
-          if (item.priority === 1) high += mbps;
-          else if (item.priority === 2) medium += mbps;
-          else if (item.priority === 3) low += mbps;
-        });
-
-        return {
-          time: timeLabel,
-          total: high + medium + low,
-          high,
-          medium,
-          low
-        };
-      });
 
       setData(transformed);
     } catch (err) {
       console.error('Failed to fetch bandwidth history:', err);
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    fetchHistory();
-    const id = setInterval(fetchHistory, 5000);
+    fetchHistory(true);
+    const id = setInterval(() => fetchHistory(false), POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, []);
 
-  const CustomTooltip = ({ active, payload, label }) => {
-    if (!active || !payload?.length) return null;
-    return (
-      <div className="bg-white border border-slate-200 rounded-lg p-3 shadow-lg">
-        <p className="font-semibold text-slate-900 mb-2">{label}</p>
-        {payload.map((p, i) => (
-          <div key={i} className="flex justify-between gap-3 text-sm">
-            <span className="text-slate-600">{p.name}</span>
-            <span className="font-mono font-bold">
-              {p.value.toFixed(2)} Mbps
-            </span>
-          </div>
-        ))}
-      </div>
+  const deviceKeys = useMemo(() => {
+    if (!data.length) return [];
+    return Object.keys(data[0]).filter(
+      (k) => k !== 'time' && k !== 'total'
     );
-  };
+  }, [data]);
+
+  const colors = [
+    '#3b82f6',
+    '#8b5cf6',
+    '#10b981',
+    '#f59e0b',
+    '#ef4444',
+    '#14b8a6',
+    '#6366f1',
+  ];
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-8 shadow-sm relative">
-      {loading && (
-        <div className="absolute inset-0 bg-white/50 backdrop-blur-sm flex items-center justify-center z-10">
-          <div className="flex flex-col items-center gap-2">
-            <div className="w-10 h-10 border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin" />
-            <span className="text-sm text-slate-600">Loading bandwidth data…</span>
-          </div>
-        </div>
-      )}
-
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
           <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600">
             <BarChart3 className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-slate-900">Bandwidth Usage</h2>
-            <p className="text-sm text-slate-500">Live ML allocation output</p>
+            <h2 className="text-2xl font-bold text-slate-900">
+              Bandwidth Allocation
+            </h2>
+            <p className="text-sm text-slate-500">
+             Dynamic bandwidth redistribution by ML (per device)
+            </p>
           </div>
         </div>
 
@@ -120,74 +120,90 @@ const BandwidthChart = () => {
             Total
           </button>
           <button
-            onClick={() => setView('priority')}
+            onClick={() => setView('devices')}
             className={cn(
               'px-4 py-1.5 text-sm font-medium rounded-md',
-              view === 'priority'
+              view === 'devices'
                 ? 'bg-white shadow text-slate-900'
                 : 'text-slate-600'
             )}
           >
-            By Priority
+            Per Device
           </button>
         </div>
       </div>
 
-      {data.length === 0 ? (
-        <div className="h-64 flex items-center justify-center text-slate-500">
-          <TrendingUp className="w-10 h-10 mb-2" />
-          <p>No bandwidth history yet</p>
-        </div>
-      ) : (
-        <div className="h-80">
+      {/* Body */}
+      <div className="h-80">
+        {initialLoading ? (
+          <div className="h-full flex flex-col items-center justify-center text-slate-400">
+            <TrendingUp className="w-12 h-12 mb-3" />
+            <p className="font-medium">Loading bandwidth history…</p>
+          </div>
+        ) : data.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-slate-400">
+            <TrendingUp className="w-12 h-12 mb-3" />
+            <p className="font-medium">No history available yet</p>
+          </div>
+        ) : (
           <ResponsiveContainer width="100%" height="100%">
             {view === 'total' ? (
-              <LineChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="time" />
-                <YAxis label={{ value: 'Mbps', angle: -90, position: 'insideLeft' }} />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="total"
-                  name="Total Bandwidth"
-                  stroke="#3b82f6"
-                  strokeWidth={3}
-                  dot={false}
-                />
-              </LineChart>
-            ) : (
               <AreaChart data={data}>
                 <defs>
-                  <linearGradient id="high" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="medium" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="low" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  <linearGradient id="totalGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                   </linearGradient>
                 </defs>
 
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="time" />
-                <YAxis label={{ value: 'Mbps', angle: -90, position: 'insideLeft' }} />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend />
-
-                <Area type="monotone" dataKey="high" name="High Priority" stroke="#ef4444" fill="url(#high)" />
-                <Area type="monotone" dataKey="medium" name="Medium Priority" stroke="#f59e0b" fill="url(#medium)" />
-                <Area type="monotone" dataKey="low" name="Low Priority" stroke="#10b981" fill="url(#low)" />
+                <YAxis
+                  label={{
+                    value: 'Mbps',
+                    angle: -90,
+                    position: 'insideLeft',
+                  }}
+                />
+                <Tooltip />
+                <Area
+                  type="monotone"
+                  dataKey="total"
+                  stroke="#3b82f6"
+                  strokeWidth={3}
+                  fill="url(#totalGrad)"
+                  name="Total Bandwidth"
+                />
               </AreaChart>
+            ) : (
+              <LineChart data={data}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="time" />
+                <YAxis
+                  label={{
+                    value: 'Mbps',
+                    angle: -90,
+                    position: 'insideLeft',
+                  }}
+                />
+                <Tooltip />
+                <Legend />
+                {deviceKeys.map((key, i) => (
+                  <Line
+                    key={key}
+                    type="monotone"
+                    dataKey={key}
+                    name={`Device ${key.slice(-5)}`}
+                    stroke={colors[i % colors.length]}
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                ))}
+              </LineChart>
             )}
           </ResponsiveContainer>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

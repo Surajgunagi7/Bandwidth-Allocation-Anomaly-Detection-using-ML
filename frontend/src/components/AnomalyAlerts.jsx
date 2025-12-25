@@ -1,38 +1,44 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Clock, TrendingUp, Shield } from 'lucide-react';
+import { AlertTriangle, TrendingUp, Shield } from 'lucide-react';
 import api from '@/services/api';
 import { cn } from '@/lib/utils';
 
+const POLL_INTERVAL_MS = 5000;
+
 const AnomalyAlerts = () => {
   const [anomalies, setAnomalies] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
 
   const fetchAnomalies = async () => {
     try {
       const data = await api.getAnomalies();
-      setAnomalies(data.anomalies || []);
+
+      const unique = {};
+      (data.anomalies || []).forEach(a => {
+        const mac = a.mac || a.mac_address;
+        if (!mac) return;
+
+        if (!unique[mac]) {
+          unique[mac] = {
+            ...a,
+            mac, // normalize
+          };
+        }
+      });
+
+      setAnomalies(Object.values(unique));
     } catch (err) {
       console.error('Failed to fetch anomalies:', err);
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
     }
   };
 
   useEffect(() => {
     fetchAnomalies();
-    const interval = setInterval(fetchAnomalies, 5000);
+    const interval = setInterval(fetchAnomalies, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, []);
-
-  const formatTimestamp = (ts) => {
-    if (!ts) return 'Unknown time';
-    const date = ts > 1e12 ? new Date(ts) : new Date(ts * 1000);
-    const diff = Math.floor((Date.now() - date.getTime()) / 60000);
-    if (diff < 1) return 'Just now';
-    if (diff < 60) return `${diff}m ago`;
-    if (diff < 1440) return `${Math.floor(diff / 60)}h ago`;
-    return date.toLocaleDateString();
-  };
 
   const severity = (score = 0) => {
     if (score >= 0.8) return { label: 'Critical', color: 'red' };
@@ -40,14 +46,16 @@ const AnomalyAlerts = () => {
     return { label: 'Notice', color: 'yellow' };
   };
 
-  return (
-    <div className="bg-white rounded-xl border overflow-hidden relative">
-      {loading && (
-        <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10">
-          <p className="text-slate-500 font-medium">Scanning anomalies…</p>
-        </div>
-      )}
+  if (initialLoading) {
+    return (
+      <div className="bg-white rounded-xl border p-8 text-center text-slate-500">
+        Scanning anomalies…
+      </div>
+    );
+  }
 
+  return (
+    <div className="bg-white rounded-xl border overflow-hidden">
       <div className="p-6 border-b bg-slate-50 flex items-center gap-3">
         <AlertTriangle className="w-6 h-6 text-red-600" />
         <div>
@@ -68,42 +76,30 @@ const AnomalyAlerts = () => {
           anomalies.map((a, i) => {
             const sev = severity(a.anomaly_score);
             return (
-              <div key={i} className="p-5 flex justify-between gap-4">
+              <div key={i} className="p-5 flex justify-between items-center">
                 <div>
-                  <p className="font-semibold">
-                    Device {a.mac?.slice(-5)}
+                  <p className="font-semibold">{sev.label}</p>
+                  <p className="text-xs font-mono text-slate-500">
+                    {a.mac}
                   </p>
-                  <p className="text-xs text-slate-500 font-mono">{a.mac}</p>
-
-                  <div className="flex gap-4 mt-2 text-xs text-slate-500">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {formatTimestamp(a.timestamp)}
-                    </span>
-                    {a.bandwidth_kbps && (
-                      <span className="flex items-center gap-1">
-                        <TrendingUp className="w-3 h-3" />
-                        {(a.bandwidth_kbps / 1000).toFixed(2)} Mbps
-                      </span>
-                    )}
-                  </div>
+                  {a.bandwidth_kbps != null && (
+                    <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
+                      <TrendingUp className="w-3 h-3" />
+                      {(a.bandwidth_kbps / 1000).toFixed(2)} Mbps
+                    </p>
+                  )}
                 </div>
 
-                <div className="text-right">
-                  <span
-                    className={cn(
-                      'px-3 py-1 rounded-full text-xs font-bold',
-                      sev.color === 'red' && 'bg-red-100 text-red-700',
-                      sev.color === 'amber' && 'bg-amber-100 text-amber-700',
-                      sev.color === 'yellow' && 'bg-yellow-100 text-yellow-700'
-                    )}
-                  >
-                    {sev.label}
-                  </span>
-                  <p className="text-xs font-semibold text-slate-500 mt-1">
-                    {(a.anomaly_score * 100).toFixed(0)}% risk
-                  </p>
-                </div>
+                <span
+                  className={cn(
+                    'px-3 py-1 rounded-full text-xs font-bold',
+                    sev.color === 'red' && 'bg-red-100 text-red-700',
+                    sev.color === 'amber' && 'bg-amber-100 text-amber-700',
+                    sev.color === 'yellow' && 'bg-yellow-100 text-yellow-700'
+                  )}
+                >
+                  {sev.label}
+                </span>
               </div>
             );
           })
