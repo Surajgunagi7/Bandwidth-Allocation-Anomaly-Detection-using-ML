@@ -1,56 +1,63 @@
-# ML-Based WiFi Bandwidth Allocation System - Fixed Version
+# Bandwidth Allocation Anomaly Detection using ML
 
-## What Was Fixed
+## Overview
+This project implements a machine learning-based system for detecting anomalies in bandwidth allocation. It consists of a backend service, a frontend dashboard, and a Mininet-based network simulation environment.
 
-### 1. **RTNETLINK "File exists" Errors**
-- **Problem**: TC classes were not being properly cleaned up before reinitialization
-- **Fix**: Implemented complete TC cleanup before every initialization
-- **Location**: `bandwidth_enforcer.py` - `_complete_cleanup()` method
+## Project Structure
+- **backend/**: Contains the Flask backend for handling API requests and processing data.
+- **frontend/**: Contains the React application for the user interface.
+- **mininet/**: Contains scripts for simulating network topologies.
+- **training/**: Contains Jupyter notebooks for training machine learning models.
 
-### 2. **Low Bandwidth Allocations**
-- **Problem**: ML models predicting very low bandwidth (314 kbps instead of using 100 Mbps pool)
-- **Fix**: 
-  - Added minimum bandwidth guarantee (`MIN_BANDWIDTH_KBPS = 512`)
-  - Improved normalization to use full bandwidth pool
-  - Better priority-based distribution (50% high, 30% medium, 20% low)
-- **Location**: `config.py`, `bandwidth_enforcer.py`
+## Setup Instructions
+### Backend
+1. Navigate to the backend directory:
+   ```bash
+   cd backend
+   ```
+2. Set up a virtual environment and activate it:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+3. Install the required packages:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Run the backend application:
+   ```bash
+   sudo venv/bin/python app.py
+   ```
 
-### 3. **Dynamic Bandwidth Detection**
-- **Problem**: Bandwidth hardcoded in .env file
-- **Fix**: 
-  - Auto-detection using ethtool/iwconfig
-  - API endpoint to set bandwidth manually: `POST /api/bandwidth/config`
-  - Utility script: `detect_bandwidth.py`
-- **Location**: `config.py`, `app.py`
+### Mininet
+1. Run the topology script with sudo:
+   ```bash
+   sudo python3 topology.py
+   ```
 
-### 4. **Excessive Logging**
-- **Problem**: Too much console output making it hard to see important messages
-- **Fix**:
-  - All logs now go to `logs/app.log` file
-  - Console only shows WARNING and ERROR level messages
-  - Organized log format with timestamps
-- **Location**: `config.py` - `setup_logging()` method
+### Frontend
+1. Navigate to the frontend directory:
+   ```bash
+   cd frontend
+   ```
+2. Install the required packages:
+   ```bash
+   npm install
+   ```
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
 
-### 5. **MAC Address Collision Issues**
-- **Problem**: Class IDs were colliding causing allocation failures
-- **Fix**: Persistent MAC-to-class-ID mapping with auto-increment
-- **Location**: `bandwidth_enforcer.py` - `_get_or_create_class_id()` method
+## Features
+- **Dynamic Bandwidth Detection**: The system can dynamically detect and allocate bandwidth based on network conditions.
+- **Anomaly Detection**: Utilizes machine learning models to identify anomalies in bandwidth usage.
+- **User Dashboard**: A web interface for monitoring and controlling bandwidth allocation.
 
-## Installation
+## Conclusion
+This project aims to provide an intelligent solution for managing network bandwidth using machine learning techniques. For more details, refer to the individual module documentation within the project.bash
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
 
-# Make scripts executable
-chmod +x detect_bandwidth.py
-
-# Detect bandwidth (optional)
-sudo python3 detect_bandwidth.py ap1-wlan1
-
-# Run with sudo (required for TC commands)
-sudo python3 app.py
-```
 
 ## Configuration
 
