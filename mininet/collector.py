@@ -241,7 +241,6 @@ def watchdog_loop(incoming: Path, q: queue.Queue, logger, poll_interval=1.0, rot
                 except Exception:
                     continue
                 
-                # Wait a bit to check stability
                 time.sleep(max(0.2, min(1.0, rotate_secs / 3)))
                 
                 try:
