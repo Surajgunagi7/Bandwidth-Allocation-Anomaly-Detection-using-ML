@@ -126,13 +126,13 @@ def topology(start_collector=False,traffic=False):
 
 def start_test_traffic(net, duration=180):
     """
-    Demo traffic for bandwidth ML testing
-    - sta1: High TCP bulk
-    - sta2: Medium HTTP bursts
-    - sta3: Low steady UDP
+    Enhanced demo traffic for bandwidth differentiation
+    - sta1: Aggressive TCP bulk (hog)
+    - sta2: High-rate UDP (video)
+    - sta3: Low-rate UDP (VoIP)
     """
 
-    info("*** Starting ML demo traffic\n")
+    info("*** Starting ML demo traffic (enhanced)\n")
 
     sta1 = net.get('sta1')
     sta2 = net.get('sta2')
@@ -144,24 +144,23 @@ def start_test_traffic(net, duration=180):
 
     h1.cmd("iperf -s -D")
     h1.cmd("iperf -s -u -D")
-    h1.cmd("python3 -m http.server 80 &")
 
+    # sta1 – TCP bulk (aggressive)
     sta1.cmd(
-        f"iperf -c {h1.IP()} -t {duration} -i 1 &"
+        f"iperf -c {h1.IP()} -t {duration} -i 1 -w 4M &"
     )
 
+    # sta2 – UDP video (forces congestion)
     sta2.cmd(
-        f"while true; do "
-        f"wget -O /dev/null http://{h1.IP()}:80 || true; "
-        f"sleep 1.5; "
-        f"done &"
+        f"iperf -u -c {h1.IP()} -b 15M -t {duration} &"
     )
 
+    # sta3 – UDP VoIP (latency sensitive)
     sta3.cmd(
-        f"iperf -u -c {h1.IP()} -b 512K -t {duration} &"
+        f"iperf -u -c {h1.IP()} -b 1M -t {duration} &"
     )
 
-    info("*** Demo traffic started\n")
+    info("*** Enhanced demo traffic started\n")
 
 
 def start_attack_traffic(net, duration=180):

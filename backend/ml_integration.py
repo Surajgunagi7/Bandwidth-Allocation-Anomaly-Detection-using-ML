@@ -93,7 +93,7 @@ class MLModelManager:
         
         if Config.NO_BANDWIDTH_LIMIT_MODE:
             result = features_df[['mac_address']].copy()
-            result['predicted_bandwidth_kbps'] = 100000  
+            result['predicted_bandwidth_kbps'] = 50000 
             result['confidence'] = 1.0
             logger.info("No bandwidth limit mode enabled - assigning max bandwidth")
             return result
