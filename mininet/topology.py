@@ -124,7 +124,7 @@ def topology(start_collector=False,traffic=False):
     info("*** Stopping network\n")
     net.stop()
 
-def start_test_traffic(net, duration=180):
+def start_attack_traffic2(net, duration=180):
     """
     Enhanced demo traffic for bandwidth differentiation
     - sta1: Aggressive TCP bulk (hog)
@@ -202,6 +202,44 @@ def start_attack_traffic(net, duration=180):
     time.sleep(duration)
     h1.cmd("pkill -f iperf || true")
 
+def start_test_traffic(net, duration=180):
+    """
+    Demo traffic for bandwidth ML testing
+    - sta1: High TCP bulk
+    - sta2: Medium HTTP bursts
+    - sta3: Low steady UDP
+    """
+
+    info("*** Starting ML demo traffic\n")
+
+    sta1 = net.get('sta1')
+    sta2 = net.get('sta2')
+    sta3 = net.get('sta3')
+    h1 = net.get('h1')
+
+    h1.cmd("pkill -f iperf || true")
+    h1.cmd("pkill -f http.server || true")
+
+    h1.cmd("iperf -s -D")
+    h1.cmd("iperf -s -u -D")
+    h1.cmd("python3 -m http.server 80 &")
+
+    sta1.cmd(
+        f"iperf -c {h1.IP()} -t {duration} -i 1 &"
+    )
+
+    sta2.cmd(
+        f"while true; do "
+        f"wget -O /dev/null http://{h1.IP()}:80 || true; "
+        f"sleep 1.5; "
+        f"done &"
+    )
+
+    sta3.cmd(
+        f"iperf -u -c {h1.IP()} -b 512K -t {duration} &"
+    )
+
+    info("*** Demo traffic started\n")
 
 if __name__ == '__main__':
     setLogLevel('info')
