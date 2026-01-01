@@ -21,7 +21,6 @@ CORS(app)
 app.secret_key = Config.SECRET_KEY
 start_time = time.time()
 
-# Logging is now configured in Config
 logger = logging.getLogger(__name__)
 
 # Initialize pipeline
@@ -214,7 +213,6 @@ def generate_filename(original_filename):
     return f"{timestamp}_{secure_name}"
 
 
-# ============= CORE ROUTES =============
 
 @app.route("/", methods=["GET"])
 def home():
@@ -317,8 +315,6 @@ def health():
     }), 200
 
 
-# ============= NEW API ROUTES =============
-
 @app.route("/api/bandwidth/config", methods=["GET", "POST"])
 def bandwidth_config():
     """Get or set bandwidth configuration"""
@@ -420,14 +416,36 @@ def get_anomalies():
 
 @app.route("/api/history", methods=["GET"])
 def get_history():
-    """Get prediction history"""
+    """Get prediction history with enforced bandwidth alignment"""
     try:
-        limit = int(request.args.get('limit', 10))
+        limit = int(request.args.get("limit", 10))
+
         with pipeline_lock:
-            history = pipeline.history[-limit:]
+            history = list(pipeline.history[-limit:])
+
+            enforced_map = {
+                mac: alloc.allocated_bw_kbps
+                for mac, alloc in pipeline.decision_engine.tc_controller.active_allocations.items()
+            }
+
+        if history:
+            latest = history[-1]
+
+            if "final" in latest:
+                for item in latest["final"]:
+                    mac = item.get("mac_address")
+
+                    if mac in enforced_map:
+                        item["enforced_bandwidth_kbps"] = enforced_map[mac]
+                    else:
+                        item["enforced_bandwidth_kbps"] = item.get(
+                            "predicted_bandwidth_kbps", 0
+                        )
+
         return jsonify({"history": history}), 200
+
     except Exception as e:
-        logger.error(f"Get history error: {e}")
+        logger.error(f"Get history error: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 

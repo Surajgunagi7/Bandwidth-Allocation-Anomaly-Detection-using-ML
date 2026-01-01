@@ -7,51 +7,16 @@ import {
   Smartphone,
   Tv,
   Wifi,
+  RefreshCcw,
 } from 'lucide-react';
 
-import api from '@/services/api';
 import { cn } from '@/lib/utils';
 
-const DeviceTable = ({ onOverride }) => {
-  const [devices, setDevices] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+const DeviceTable = ({ devices, error, onOverride }) => {
 
-  const fetchDevices = async () => {
-    try {
-      const data = await api.getDevices();
-      setDevices(data.devices || []);
-      setError(null);
-    } catch (err) {
-      console.error(err);
-      setError('Failed to fetch devices');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDevices();
-    const interval = setInterval(fetchDevices, 3000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const getDeviceIcon = (trafficClass = '') => {
-    const t = trafficClass.toLowerCase();
-    if (t.includes('video')) return Tv;
-    if (t.includes('voip')) return Smartphone;
-    if (t.includes('bulk')) return Laptop;
+  const getDeviceIcon = () => {
     return Wifi;
   };
-
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-xl p-6 flex items-center gap-3">
-        <AlertTriangle className="w-6 h-6 text-red-600" />
-        <p className="text-red-700 font-semibold">{error}</p>
-      </div>
-    );
-  }
 
   return (
     <div className="bg-white rounded-xl border overflow-hidden">
@@ -68,6 +33,12 @@ const DeviceTable = ({ onOverride }) => {
           </div>
         </div>
       </div>
+      {error && (
+        <div className="px-6 py-3 text-sm text-black-700 bg-white border-b flex items-center gap-2">
+          <RefreshCcw className="w-4 h-4" />
+          Updating...
+        </div>
+      )}
 
       <div className="divide-y">
         {devices.length === 0 ? (
@@ -76,9 +47,8 @@ const DeviceTable = ({ onOverride }) => {
           </div>
         ) : (
           devices.map((device) => {
-            const Icon = getDeviceIcon(device.traffic_class);
+            const Icon = getDeviceIcon();
             const isAnomaly = Boolean(device.is_anomaly);
-            const isSuspicious = device.is_suspicious && !device.is_anomaly;
 
             return (
               <div key={device.mac} className="p-6 flex justify-between items-start">
@@ -88,8 +58,6 @@ const DeviceTable = ({ onOverride }) => {
                       'p-3 rounded-lg border',
                       isAnomaly
                         ? 'bg-red-50 border-red-200 text-red-600'
-                        : isSuspicious
-                        ? 'bg-amber-50 border-amber-200 text-amber-600'
                         : 'bg-white border-slate-200 text-slate-500'
                     )}
                   >
@@ -109,11 +77,6 @@ const DeviceTable = ({ onOverride }) => {
                         </span>
                       )}
 
-                      {isSuspicious && (
-                        <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-amber-100 text-amber-700">
-                          Suspicious
-                        </span>
-                      )}
                     </div>
 
                     <p className="text-xs font-mono text-slate-500">
@@ -123,19 +86,12 @@ const DeviceTable = ({ onOverride }) => {
                     <div className="flex gap-8 mt-3">
                       <div>
                         <p className="text-xs text-slate-400">Allocated Bandwidth</p>
-                        <p className="font-mono font-bold">
-                          {(device.bandwidth_kbps / 1000).toFixed(2)} Mbps
-                        </p>
+                        {device.bandwidth_kbps != null && (
+                            <p className="font-mono font-bold">
+                              {(device.bandwidth_kbps / 1000).toFixed(2)} Mbps
+                            </p>
+                          )}
                       </div>
-
-                      {device.traffic_class && device.traffic_class !== 'unknown' && (
-                        <div>
-                          <p className="text-xs text-slate-400">Traffic Type</p>
-                          <p className="text-sm font-medium text-slate-700 capitalize">
-                            {device.traffic_class}
-                          </p>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>

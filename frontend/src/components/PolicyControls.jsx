@@ -20,20 +20,16 @@ const emptyForm = {
 };
 
 const PolicyControls = ({ selectedDevice, onClose }) => {
-  // --- Global policy state ---
   const [policyMode, setPolicyMode] = useState(null);
   const [changingMode, setChangingMode] = useState(false);
 
-  // --- Device override form ---
   const [form, setForm] = useState(emptyForm);
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
 
-  // --- UX feedback ---
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // ---------- Helpers ----------
   const validate = () => {
     const err = {};
     if (!form.mac) err.mac = 'MAC address is required';
@@ -52,8 +48,6 @@ const PolicyControls = ({ selectedDevice, onClose }) => {
     setTimeout(() => setMessage(null), 3000);
   };
 
-  // ---------- Lifecycle ----------
-  // Load current global policy mode on open
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -72,7 +66,6 @@ const PolicyControls = ({ selectedDevice, onClose }) => {
     };
   }, []);
 
-  // Rehydrate form whenever selectedDevice changes
   useEffect(() => {
     if (selectedDevice) {
       setForm({
@@ -87,7 +80,6 @@ const PolicyControls = ({ selectedDevice, onClose }) => {
     setErrors({});
   }, [selectedDevice]);
 
-  // ---------- Actions ----------
   const changePolicyMode = async (mode) => {
     if (mode === policyMode) return;
     setChangingMode(true);
@@ -137,10 +129,9 @@ const PolicyControls = ({ selectedDevice, onClose }) => {
     }
   };
 
-  // ---------- Derived ----------
   const hasDevice = useMemo(() => Boolean(form.mac), [form.mac]);
+  const canOverride = policyMode === 'manual';
 
-  // ---------- UI ----------
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
       <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full border border-slate-200">
@@ -284,20 +275,36 @@ const PolicyControls = ({ selectedDevice, onClose }) => {
                   <option value="">Permanent</option>
                 </select>
               </div>
+              {policyMode !== 'manual' && (
+                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 flex gap-2">
+                  <Info className="w-4 h-4 shrink-0" />
+                  Device overrides are available only in <b>manual</b> policy mode.
+                </div>
+              )}
 
               <div className="flex gap-3 pt-2">
                 <button
                   type="submit"
-                  disabled={submitting || !hasDevice}
-                  className="flex-1 bg-blue-600 text-white py-2 rounded font-bold disabled:opacity-50"
+                  disabled={submitting || !hasDevice || !canOverride}
+                  className={cn(
+                    'flex-1 py-2 rounded font-bold',
+                    canOverride
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                  )}
                 >
                   Apply Override
                 </button>
                 <button
                   type="button"
                   onClick={clearOverride}
-                  disabled={!hasDevice || submitting}
-                  className="flex-1 border border-red-300 text-red-600 py-2 rounded font-bold disabled:opacity-50"
+                  disabled={!hasDevice || submitting || !canOverride}
+                  className={cn(
+                    'flex-1 py-2 rounded font-bold border',
+                    canOverride
+                      ? 'border-red-300 text-red-600'
+                      : 'border-slate-300 text-slate-400 cursor-not-allowed'
+                  )}
                 >
                   Clear Override
                 </button>

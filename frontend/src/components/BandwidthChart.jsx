@@ -12,72 +12,62 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { BarChart3, RefreshCw, TrendingUp } from 'lucide-react';
-import api from '@/services/api';
 import { cn } from '@/lib/utils';
 
-const POLL_INTERVAL_MS = 5000;
-const HISTORY_LIMIT = 30;
+const BandwidthChart = ({ history }) => {
+  const [view, setView] = useState('total'); 
 
-const BandwidthChart = () => {
-  const [data, setData] = useState([]);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [view, setView] = useState('total'); // 'total' | 'devices'
+  const data = useMemo(() => {
+    if (!history || history.length === 0) return [];
 
-  const fetchHistory = async (isInitial = false) => {
-    try {
-      if (isInitial) setInitialLoading(true);
-      else setRefreshing(true);
+    const lastSeen = {}; 
 
-      const res = await api.getHistory(HISTORY_LIMIT);
-      const history = res?.history || [];
-
-      // Oldest → newest
-      const transformed = history
-        .slice()
-        .reverse()
-        .map((entry) => {
-          const date = new Date(entry.timestamp);
-          const time = date.toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-          });
-
-          let total = 0;
-          const devices = {};
-
-          (entry.final || []).forEach((item) => {
-            const mac = item.mac_address || 'unknown';
-            const mbps = (item.predicted_bandwidth_kbps || 0) / 1000;
-            devices[mac] = mbps;
-            total += mbps;
-          });
-
-          return { time, total, ...devices };
+    return history
+      .slice()
+      .reverse()
+      .map((entry) => {
+        const date = new Date(entry.timestamp);
+        const time = date.toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
         });
 
-      setData(transformed);
-    } catch (err) {
-      console.error('Failed to fetch bandwidth history:', err);
-    } finally {
-      setInitialLoading(false);
-      setRefreshing(false);
-    }
-  };
+        let total = 0;
+        const devices = {};
 
-  useEffect(() => {
-    fetchHistory(true);
-    const id = setInterval(() => fetchHistory(false), POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, []);
+        Object.keys(lastSeen).forEach((mac) => {
+          devices[mac] = lastSeen[mac];
+          total += lastSeen[mac];
+        });
 
-  const deviceKeys = useMemo(() => {
-    if (!data.length) return [];
-    return Object.keys(data[0]).filter(
-      (k) => k !== 'time' && k !== 'total'
-    );
+        (entry.final || []).forEach((item) => {
+          const mac = item.mac_address || 'unknown';
+          const mbps = item.enforced_bandwidth_kbps / 1000;
+
+          devices[mac] = mbps;
+          lastSeen[mac] = mbps;
+
+          total =
+            total -
+            (lastSeen[mac] ?? 0) +
+            mbps;
+        });
+
+        return { time, total, ...devices };
+      });
+    }, [history]);  
+
+    const deviceKeys = useMemo(() => {
+      const set = new Set();
+      data.forEach(row => {
+        Object.keys(row).forEach(k => {
+          if (k !== 'time' && k !== 'total') set.add(k);
+        });
+      });
+      return [...set];
   }, [data]);
+
 
   const colors = [
     '#3b82f6',
@@ -135,7 +125,7 @@ const BandwidthChart = () => {
 
       {/* Body */}
       <div className="h-80">
-        {initialLoading ? (
+        {!history ? (
           <div className="h-full flex flex-col items-center justify-center text-slate-400">
             <TrendingUp className="w-12 h-12 mb-3" />
             <p className="font-medium">Loading bandwidth history…</p>

@@ -167,6 +167,10 @@ class PCAPFeatureExtractor:
             dst_mac = pkt.dst if hasattr(pkt, 'dst') else 'unknown'
             src_ip = pkt[IP].src
             dst_ip = pkt[IP].dst
+
+            if src_ip.startswith("10.0.0.15"):
+                continue  
+            
             protocol = pkt[IP].proto
             timestamp = float(pkt.time)
             packet_size = len(pkt)
@@ -336,7 +340,6 @@ class PCAPFeatureExtractor:
             # Entropy
             features['payload_entropy'] = self._calculate_entropy(packet_sizes)
             
-            # FIXED: Proper bidirectional ratio
             features['bidirectional_ratio'] = (
                 agg['bidirectional_flows'] / agg['total_flows'] 
                 if agg['total_flows'] > 0 else 0.0

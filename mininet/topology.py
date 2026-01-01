@@ -61,11 +61,21 @@ def topology(start_collector=False,traffic=False):
         ip='10.0.0.3/24',
         position='70,50,0'
     )
+    sta4 = net.addStation(
+        'sta4',
+        ip='10.0.0.4/24',
+        position='50,70,0'
+    )
+    sta5 = net.addStation(
+        'sta5',
+        ip='10.0.0.5/24',
+        position='45,45,0'
+    )
 
     info("*** Adding Wired Host\n")
     h1 = net.addHost(
         'h1',
-        ip='10.0.0.4/24'
+        ip='10.0.0.15/24'
     )
 
     info("*** Configuring WiFi nodes\n")
@@ -124,7 +134,43 @@ def topology(start_collector=False,traffic=False):
     info("*** Stopping network\n")
     net.stop()
 
-def start_test_traffic(net, duration=180):
+def start_attack_traffic(net, duration=600):
+    print("Starting UDP Flood attack traffic (chaotic)")
+
+    sta1 = net.get('sta1')
+    sta2 = net.get('sta2')
+    sta3 = net.get('sta3')
+    h1 = net.get('h1')
+
+    server_ip = h1.IP()
+
+    h1.cmd("pkill -f iperf || true")
+    h1.cmd("iperf -s -u &")
+
+    sta1.cmd(
+        f"while true; do "
+        f"iperf -c {server_ip} -u -b 80M -l 1400 -t 3; "
+        f"sleep 0.3; "
+        f"iperf -c {server_ip} -u -b 5M -l 400 -t 2; "
+        f"sleep 0.2; "
+        f"done &"
+    )
+
+    sta2.cmd(
+        f"while true; do "
+        f"iperf -c {server_ip} -u -b 60M -l 1200 -t 4; "
+        f"sleep 0.1; "
+        f"done &"
+    )
+
+    sta3.cmd(
+        f"while true; do "
+        f"iperf -c {server_ip} -u -b 90M -l 200 -t 1; "
+        f"sleep 0.5; "
+        f"done &"
+    )
+
+def start_test_traffic(net, duration=600):
     """
     Demo traffic for bandwidth ML testing
     - sta1: High TCP bulk
@@ -162,47 +208,6 @@ def start_test_traffic(net, duration=180):
     )
 
     info("*** Demo traffic started\n")
-
-
-def start_attack_traffic(net, duration=180):
-    print("Starting UDP Flood attack traffic (chaotic)")
-
-    sta1 = net.get('sta1')
-    sta2 = net.get('sta2')
-    sta3 = net.get('sta3')
-    h1 = net.get('h1')
-
-    server_ip = h1.IP()
-
-    h1.cmd("pkill -f iperf || true")
-    h1.cmd("iperf -s -u &")
-
-    sta1.cmd(
-        f"while true; do "
-        f"iperf -c {server_ip} -u -b 80M -l 1400 -t 3; "
-        f"sleep 0.3; "
-        f"iperf -c {server_ip} -u -b 5M -l 400 -t 2; "
-        f"sleep 0.2; "
-        f"done &"
-    )
-
-    sta2.cmd(
-        f"while true; do "
-        f"iperf -c {server_ip} -u -b 60M -l 1200 -t 4; "
-        f"sleep 0.1; "
-        f"done &"
-    )
-
-    sta3.cmd(
-        f"while true; do "
-        f"iperf -c {server_ip} -u -b 90M -l 200 -t 1; "
-        f"sleep 0.5; "
-        f"done &"
-    )
-
-    time.sleep(duration)
-    h1.cmd("pkill -f iperf || true")
-
 
 if __name__ == '__main__':
     setLogLevel('info')
