@@ -359,7 +359,7 @@ class BandwidthDecisionEngine:
         
         return change >= self.change_threshold or old.priority != new.priority
     
-    def process_ml_predictions(self, predictions: List[Dict]):
+    def process_ml_predictions(self, predictions: List[Dict], policy_mode: str = 'auto'):
         """Process ML predictions with improved normalization"""
 
         if Config.NO_BANDWIDTH_LIMIT_MODE:
@@ -369,6 +369,26 @@ class BandwidthDecisionEngine:
         if self.ap_mac is None:
             self.detect_ap_mac()
         
+        if policy_mode in ('equal', 'manual'):
+            for pred in predictions:
+                mac = pred['mac_address'].lower()
+
+                if self.ap_mac and mac == self.ap_mac:
+                    continue
+                allocation = BandwidthAllocation(
+                    mac_address=mac,
+                    allocated_bw_kbps=pred['predicted_bandwidth_kbps'],
+                    priority=pred.get('priority', 2),
+                    device_ip=pred.get('ip_address')
+                )
+
+                old = self.tc_controller.active_allocations.get(mac)
+                if old and not self.should_update(old, allocation):
+                    continue    
+                self.tc_controller.apply_allocation(allocation)
+            logger.info(f"Policy mode '{policy_mode}': direct enforcement applied")
+            return
+
         # Group by priority
         priority_groups = {1: [], 2: [], 3: []}
         

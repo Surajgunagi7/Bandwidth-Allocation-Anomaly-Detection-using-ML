@@ -93,7 +93,7 @@ class MLModelManager:
         
         if Config.NO_BANDWIDTH_LIMIT_MODE:
             result = features_df[['mac_address']].copy()
-            result['predicted_bandwidth_kbps'] = 50000 
+            result['predicted_bandwidth_kbps'] = Config.MIN_BANDWIDTH_KBPS * 2
             result['confidence'] = 1.0
             logger.info("No bandwidth limit mode enabled - assigning max bandwidth")
             return result
@@ -117,7 +117,6 @@ class MLModelManager:
             
             predictions = self.bandwidth_model.predict(X_scaled)
             
-            # Get confidence if available
             confidence = np.ones(len(predictions))
             if hasattr(self.bandwidth_model, 'predict_proba'):
                 try:
@@ -127,7 +126,6 @@ class MLModelManager:
                     pass
             
             result = features_df[['mac_address']].copy()
-            # Clip to reasonable range: 100 kbps to 50 Mbps
             result['predicted_bandwidth_kbps'] = np.clip(predictions, 100, 50000).round().astype(int)
             result['confidence'] = confidence
             
@@ -217,12 +215,18 @@ class MLModelManager:
                 # VoIP: UDP + low BPS + low std
                 if proto == 2 and bps < 5000 and std_size < 200:
                     return 'voip'
+                # Video Conference: UDP + moderate BPS + moderate std
+                elif proto == 2 and 5000 <= bps <= 15000 and std_size < 800:
+                    return 'video_conference'
+                # Streaming: UDP + high BPS
+                elif proto == 1 and bps > 20000:
+                    return 'streaming'
+                # File Transfer: TCP + very high BPS + few ports
+                elif proto == 1 and bps > 10000 and ports <= 2:
+                    return 'file_transfer'
                 # Video: moderate to high BPS
                 elif 3000 < bps < 20000:
                     return 'video'
-                # Bulk: TCP + high BPS
-                elif proto == 1 and bps > 10000:
-                    return 'bulk'
                 # Web: multiple ports
                 elif ports > 3:
                     return 'web'
@@ -254,7 +258,6 @@ class TemporalSmoother:
         if len(self.history[mac]) == 1:
             return new_prediction
         
-        # Simple average for now (weighted average can be added)
         avg = int(np.mean([h['bw'] for h in self.history[mac]]))
         return avg
     
@@ -303,10 +306,10 @@ class PolicyLayer:
             self.global_mode = mode
             logger.info(f"🌐 Global mode: {mode}")
     
-    def apply_policy(self, mac: str, ml_bandwidth: int, ml_priority: int) -> tuple:
+    def apply_policy(self, mac: str, ml_bandwidth: int, ml_priority: int, active_devices: int = 1) -> tuple:
         """Apply policy override if exists"""
         # Check expired overrides
-        if mac in self.overrides:
+        if self.global_mode == 'manual' and mac in self.overrides:
             override = self.overrides[mac]
             if override['expires_at'] and datetime.now(UTC).timestamp() > override['expires_at']:
                 del self.overrides[mac]
@@ -316,7 +319,12 @@ class PolicyLayer:
         
         # Apply global mode
         if self.global_mode == 'equal':
-            return 5000, 2  # Equal 5 Mbps
+            total_kbps = int(Config.get_total_bandwidth() * 1000)
+            per_device = max(
+                Config.MIN_BANDWIDTH_KBPS,
+                total_kbps // max(1, active_devices)
+            )
+            return per_device, 2  
         elif self.global_mode == 'manual':
             return ml_bandwidth, ml_priority
         
@@ -473,7 +481,12 @@ class PipelineController:
             ml_bw = int(row['predicted_bandwidth_kbps'])
             ml_priority = self._classify_priority(row['traffic_class'], row['is_anomaly'])
             
-            policy_bw, policy_priority = self.policy.apply_policy(mac, ml_bw, ml_priority)
+            policy_bw, policy_priority = self.policy.apply_policy(
+                mac, 
+                ml_bw, 
+                ml_priority,
+                active_devices=len(predictions)
+            )
             
             final.at[idx, 'predicted_bandwidth_kbps'] = policy_bw
             final.at[idx, 'priority'] = policy_priority
@@ -500,7 +513,7 @@ class PipelineController:
             })
         
         try:
-            self.decision_engine.process_ml_predictions(pred_dicts)
+            self.decision_engine.process_ml_predictions(pred_dicts, policy_mode=self.policy.global_mode)
             return {'status': 'enforced', 'devices_updated': len(pred_dicts)}
         except Exception as e:
             logger.error(f"Enforcement error: {e}")
@@ -540,7 +553,6 @@ class PipelineController:
             logger.error(f"Stats error: {e}")
             return {}
     
-    # API methods
     def set_device_override(self, mac: str, bandwidth_kbps: int, priority: int, duration_sec: int = None):
         """Admin override for device"""
         self.policy.set_override(mac, bandwidth_kbps, priority, duration_sec)

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Wifi,
   Settings2,
@@ -22,6 +22,65 @@ const App = () => {
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [resetting, setResetting] = useState(false);
   const [message, setMessage] = useState(null);
+  const [snapshot, setSnapshot] = useState({
+      stats: null,
+      health: null,
+      devices: [],
+      history: [],
+      anomalies: [],
+      loading: true,
+      refreshing: false,
+      error: null,
+    });
+  const poll = async () => {
+    try {
+      setSnapshot(s => ({ ...s, refreshing: true }));
+
+      const [
+        stats,
+        health,
+        devicesRes,
+        historyRes,
+        anomaliesRes,
+      ] = await Promise.all([
+        api.getStats(),
+        api.getHealth(),
+        api.getDevices(),
+        api.getHistory(30),
+        api.getAnomalies(),
+      ]);
+
+      const unique = {};
+      (anomaliesRes.anomalies || []).forEach(a => {
+        const mac = a.mac || a.mac_address;
+        if (mac && !unique[mac]) unique[mac] = { ...a, mac };
+      });
+
+      setSnapshot({
+        stats,
+        health,
+        devices: devicesRes.devices || [],
+        history: historyRes.history || [],
+        anomalies: Object.values(unique),
+        loading: false,
+        refreshing: false,
+        error: null,
+      });
+    } catch {
+      setSnapshot(s => ({
+        ...s,
+        loading: false,
+        refreshing: false,
+        error: true,
+      }));
+    }
+  };
+
+  useEffect(() => {
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => clearInterval(id);
+  }, []);
 
   const handleOverride = (device) => {
     setSelectedDevice(device);
@@ -55,11 +114,13 @@ const App = () => {
     }
   };
 
+
+
   return (
     <div className="flex flex-col min-h-screen bg-slate-50/50 font-sans">
       {/* Header */}
       <header className="fixed top-0 inset-x-0 bg-white/80 backdrop-blur-md border-b border-slate-200 z-40">
-        <div className="max-w-[1600px] mx-auto px-6 lg:px-10 py-4 flex items-center justify-between">
+        <div className="w-full px-6 lg:px-10 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="relative">
               <div className="p-2.5 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 shadow-lg">
@@ -136,16 +197,16 @@ const App = () => {
           </div>
         )}
 
-        <SystemStatus />
+        <SystemStatus  stats={snapshot.stats} health={snapshot.health} refreshing={snapshot.refreshing} onRefresh={poll} />
 
         <div className="grid lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
-            <BandwidthChart />
+            <BandwidthChart history={snapshot.history} />
           </div>
-          <AnomalyAlerts />
+          <AnomalyAlerts anomalies={snapshot.anomalies} loading={snapshot.loading} />
         </div>
 
-        <DeviceTable onOverride={handleOverride} />
+        <DeviceTable devices={snapshot.devices} error={snapshot.error} onOverride={handleOverride} />
       </main>
 
       {/* Footer */}

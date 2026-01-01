@@ -1,40 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Wifi, Activity, HardDrive, Zap, RefreshCw, Shield } from 'lucide-react';
-import api from '@/services/api';
 import { cn } from '@/lib/utils';
 
-const POLL_INTERVAL_MS = 5000;
+const SystemStatus = ({ stats, health, onRefresh, refreshing }) => {
 
-const SystemStatus = () => {
-  const [stats, setStats] = useState(null);
-  const [health, setHealth] = useState(null);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const fetchData = async (isInitial = false) => {
-    try {
-      if (isInitial) setInitialLoading(true);
-      else setRefreshing(true);
-
-      const [s, h] = await Promise.all([
-        api.getStats(),
-        api.getHealth(),
-      ]);
-      setStats(s);
-      setHealth(h);
-    } catch (e) {
-      console.error('Status fetch failed', e);
-    } finally {
-      setInitialLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchData(true);
-    const id = setInterval(() => fetchData(false), POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, []);
 
   const healthy = health?.status === 'healthy' && health?.worker_alive;
 
@@ -88,7 +57,7 @@ const SystemStatus = () => {
           )}
 
           <button
-            onClick={() => fetchData(false)}
+            onClick={onRefresh}
             className="flex items-center gap-2 text-sm font-medium"
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />

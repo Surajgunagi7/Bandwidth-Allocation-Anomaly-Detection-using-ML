@@ -61,11 +61,21 @@ def topology(start_collector=False,traffic=False):
         ip='10.0.0.3/24',
         position='70,50,0'
     )
+    sta4 = net.addStation(
+        'sta4',
+        ip='10.0.0.4/24',
+        position='50,70,0'
+    )
+    sta5 = net.addStation(
+        'sta5',
+        ip='10.0.0.5/24',
+        position='45,45,0'
+    )
 
     info("*** Adding Wired Host\n")
     h1 = net.addHost(
         'h1',
-        ip='10.0.0.4/24'
+        ip='10.0.0.15/24'
     )
 
     info("*** Configuring WiFi nodes\n")
@@ -124,46 +134,7 @@ def topology(start_collector=False,traffic=False):
     info("*** Stopping network\n")
     net.stop()
 
-def start_attack_traffic2(net, duration=180):
-    """
-    Enhanced demo traffic for bandwidth differentiation
-    - sta1: Aggressive TCP bulk (hog)
-    - sta2: High-rate UDP (video)
-    - sta3: Low-rate UDP (VoIP)
-    """
-
-    info("*** Starting ML demo traffic (enhanced)\n")
-
-    sta1 = net.get('sta1')
-    sta2 = net.get('sta2')
-    sta3 = net.get('sta3')
-    h1 = net.get('h1')
-
-    h1.cmd("pkill -f iperf || true")
-    h1.cmd("pkill -f http.server || true")
-
-    h1.cmd("iperf -s -D")
-    h1.cmd("iperf -s -u -D")
-
-    # sta1 – TCP bulk (aggressive)
-    sta1.cmd(
-        f"iperf -c {h1.IP()} -t {duration} -i 1 -w 4M &"
-    )
-
-    # sta2 – UDP video (forces congestion)
-    sta2.cmd(
-        f"iperf -u -c {h1.IP()} -b 15M -t {duration} &"
-    )
-
-    # sta3 – UDP VoIP (latency sensitive)
-    sta3.cmd(
-        f"iperf -u -c {h1.IP()} -b 1M -t {duration} &"
-    )
-
-    info("*** Enhanced demo traffic started\n")
-
-
-def start_attack_traffic(net, duration=180):
+def start_attack_traffic(net, duration=600):
     print("Starting UDP Flood attack traffic (chaotic)")
 
     sta1 = net.get('sta1')
@@ -199,10 +170,7 @@ def start_attack_traffic(net, duration=180):
         f"done &"
     )
 
-    time.sleep(duration)
-    h1.cmd("pkill -f iperf || true")
-
-def start_test_traffic(net, duration=180):
+def start_test_traffic(net, duration=600):
     """
     Demo traffic for bandwidth ML testing
     - sta1: High TCP bulk

@@ -1,52 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, TrendingUp, Shield } from 'lucide-react';
-import api from '@/services/api';
 import { cn } from '@/lib/utils';
 
-const POLL_INTERVAL_MS = 5000;
-
-const AnomalyAlerts = () => {
-  const [anomalies, setAnomalies] = useState([]);
-  const [initialLoading, setInitialLoading] = useState(true);
-
-  const fetchAnomalies = async () => {
-    try {
-      const data = await api.getAnomalies();
-
-      const unique = {};
-      (data.anomalies || []).forEach(a => {
-        const mac = a.mac || a.mac_address;
-        if (!mac) return;
-
-        if (!unique[mac]) {
-          unique[mac] = {
-            ...a,
-            mac, // normalize
-          };
-        }
-      });
-
-      setAnomalies(Object.values(unique));
-    } catch (err) {
-      console.error('Failed to fetch anomalies:', err);
-    } finally {
-      setInitialLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchAnomalies();
-    const interval = setInterval(fetchAnomalies, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, []);
-
+const AnomalyAlerts = ({ anomalies, loading }) => {
+  
   const severity = (score = 0) => {
     if (score >= 0.8) return { label: 'Critical', color: 'red' };
     if (score >= 0.6) return { label: 'Warning', color: 'amber' };
     return { label: 'Notice', color: 'yellow' };
   };
 
-  if (initialLoading) {
+  if (loading) {
     return (
       <div className="bg-white rounded-xl border p-8 text-center text-slate-500">
         Scanning anomalies…

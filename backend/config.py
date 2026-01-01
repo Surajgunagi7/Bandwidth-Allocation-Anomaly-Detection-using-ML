@@ -133,7 +133,7 @@ class Config:
     PREDICTION_THRESHOLD = float(os.getenv("PREDICTION_THRESHOLD", "0.7"))
     
     # KNOWN_AP_MACS is intentionally mutable (runtime AP detection)
-    KNOWN_AP_MACS = {"02:00:00:00:03:00"}
+    KNOWN_AP_MACS = set()
     
     # Traffic Control
     TC_UPDATE_INTERVAL = int(os.getenv("TC_UPDATE_INTERVAL", "10"))
